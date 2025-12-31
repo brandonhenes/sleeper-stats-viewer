@@ -152,3 +152,43 @@ export function useH2h(groupId: string | undefined, username: string | undefined
     enabled: !!groupId && !!username,
   });
 }
+
+// GET /api/group/:groupId/trades
+export function useTrades(groupId: string | undefined) {
+  return useQuery({
+    queryKey: [api.sleeper.trades.path, groupId],
+    queryFn: async () => {
+      if (!groupId) return null;
+      const url = buildUrl(api.sleeper.trades.path, { groupId });
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("League group not found");
+        throw new Error("Failed to fetch trades");
+      }
+
+      return api.sleeper.trades.responses[200].parse(await res.json());
+    },
+    enabled: !!groupId,
+  });
+}
+
+// GET /api/players/exposure?username=...
+export function usePlayerExposure(username: string | undefined) {
+  return useQuery({
+    queryKey: [api.sleeper.playerExposure.path, username],
+    queryFn: async () => {
+      if (!username) return null;
+      const url = `${api.sleeper.playerExposure.path}?username=${encodeURIComponent(username)}`;
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("User not found");
+        throw new Error("Failed to fetch player exposure");
+      }
+
+      return api.sleeper.playerExposure.responses[200].parse(await res.json());
+    },
+    enabled: !!username && username.length > 0,
+  });
+}

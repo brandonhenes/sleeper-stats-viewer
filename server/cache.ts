@@ -101,7 +101,34 @@ db.exec(`
     forced_group_id TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS trades (
+    transaction_id TEXT PRIMARY KEY,
+    league_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    roster_ids TEXT,
+    adds TEXT,
+    drops TEXT,
+    draft_picks TEXT,
+    waiver_budget TEXT,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS players_master (
+    player_id TEXT PRIMARY KEY,
+    full_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    position TEXT,
+    team TEXT,
+    status TEXT,
+    age INTEGER,
+    years_exp INTEGER,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_leagues_season ON leagues(season);
+  CREATE INDEX IF NOT EXISTS idx_trades_league ON trades(league_id);
   CREATE INDEX IF NOT EXISTS idx_leagues_group ON leagues(group_id);
   CREATE INDEX IF NOT EXISTS idx_rosters_owner ON rosters(owner_id);
   CREATE INDEX IF NOT EXISTS idx_user_leagues_user ON user_leagues(user_id);
@@ -264,6 +291,44 @@ const stmts = {
 
   // Group overrides
   getGroupOverride: db.prepare(`SELECT forced_group_id FROM group_overrides WHERE league_id = ?`),
+
+  // Trades
+  upsertTrade: db.prepare(`
+    INSERT INTO trades (transaction_id, league_id, status, created_at, roster_ids, adds, drops, draft_picks, waiver_budget, updated_at)
+    VALUES (@transaction_id, @league_id, @status, @created_at, @roster_ids, @adds, @drops, @draft_picks, @waiver_budget, @updated_at)
+    ON CONFLICT(transaction_id) DO UPDATE SET
+      status = excluded.status,
+      roster_ids = excluded.roster_ids,
+      adds = excluded.adds,
+      drops = excluded.drops,
+      draft_picks = excluded.draft_picks,
+      waiver_budget = excluded.waiver_budget,
+      updated_at = excluded.updated_at
+  `),
+
+  getTradesForLeague: db.prepare(`SELECT * FROM trades WHERE league_id = ? ORDER BY created_at DESC`),
+
+  // Players master
+  upsertPlayer: db.prepare(`
+    INSERT INTO players_master (player_id, full_name, first_name, last_name, position, team, status, age, years_exp, updated_at)
+    VALUES (@player_id, @full_name, @first_name, @last_name, @position, @team, @status, @age, @years_exp, @updated_at)
+    ON CONFLICT(player_id) DO UPDATE SET
+      full_name = excluded.full_name,
+      first_name = excluded.first_name,
+      last_name = excluded.last_name,
+      position = excluded.position,
+      team = excluded.team,
+      status = excluded.status,
+      age = excluded.age,
+      years_exp = excluded.years_exp,
+      updated_at = excluded.updated_at
+  `),
+
+  getPlayer: db.prepare(`SELECT * FROM players_master WHERE player_id = ?`),
+
+  getAllPlayers: db.prepare(`SELECT * FROM players_master`),
+
+  getPlayersLastUpdated: db.prepare(`SELECT MAX(updated_at) as last_updated FROM players_master`),
 };
 
 export interface CachedUser {
@@ -330,6 +395,32 @@ export interface H2hRecord {
   pf: number;
   pa: number;
   games: number;
+  updated_at: number;
+}
+
+export interface CachedTrade {
+  transaction_id: string;
+  league_id: string;
+  status: string;
+  created_at: number;
+  roster_ids: string | null;
+  adds: string | null;
+  drops: string | null;
+  draft_picks: string | null;
+  waiver_budget: string | null;
+  updated_at: number;
+}
+
+export interface CachedPlayer {
+  player_id: string;
+  full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  position: string | null;
+  team: string | null;
+  status: string | null;
+  age: number | null;
+  years_exp: number | null;
   updated_at: number;
 }
 
@@ -507,6 +598,72 @@ export const cache = {
   getGroupOverride(leagueId: string): string | undefined {
     const result = stmts.getGroupOverride.get(leagueId) as { forced_group_id: string } | undefined;
     return result?.forced_group_id;
+  },
+
+  // Trade methods
+  upsertTrade(trade: {
+    transaction_id: string;
+    league_id: string;
+    status: string;
+    created_at: number;
+    roster_ids?: string | null;
+    adds?: string | null;
+    drops?: string | null;
+    draft_picks?: string | null;
+    waiver_budget?: string | null;
+  }) {
+    stmts.upsertTrade.run({
+      ...trade,
+      roster_ids: trade.roster_ids || null,
+      adds: trade.adds || null,
+      drops: trade.drops || null,
+      draft_picks: trade.draft_picks || null,
+      waiver_budget: trade.waiver_budget || null,
+      updated_at: Date.now(),
+    });
+  },
+
+  getTradesForLeague(leagueId: string): CachedTrade[] {
+    return stmts.getTradesForLeague.all(leagueId) as CachedTrade[];
+  },
+
+  // Player methods
+  upsertPlayer(player: {
+    player_id: string;
+    full_name?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    position?: string | null;
+    team?: string | null;
+    status?: string | null;
+    age?: number | null;
+    years_exp?: number | null;
+  }) {
+    stmts.upsertPlayer.run({
+      ...player,
+      full_name: player.full_name || null,
+      first_name: player.first_name || null,
+      last_name: player.last_name || null,
+      position: player.position || null,
+      team: player.team || null,
+      status: player.status || null,
+      age: player.age || null,
+      years_exp: player.years_exp || null,
+      updated_at: Date.now(),
+    });
+  },
+
+  getPlayer(playerId: string): CachedPlayer | undefined {
+    return stmts.getPlayer.get(playerId) as CachedPlayer | undefined;
+  },
+
+  getAllPlayers(): CachedPlayer[] {
+    return stmts.getAllPlayers.all() as CachedPlayer[];
+  },
+
+  getPlayersLastUpdated(): number | null {
+    const result = stmts.getPlayersLastUpdated.get() as { last_updated: number | null } | undefined;
+    return result?.last_updated || null;
   },
 };
 

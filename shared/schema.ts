@@ -138,3 +138,68 @@ export type LeagueDetailsResponse = z.infer<typeof leagueDetailsResponseSchema>;
 export type SyncResponse = z.infer<typeof syncResponseSchema>;
 export type H2hOpponent = z.infer<typeof h2hOpponentSchema>;
 export type H2hResponse = z.infer<typeof h2hResponseSchema>;
+
+// Trade schemas
+export const tradeAssetSchema = z.object({
+  player_id: z.string(),
+  player_name: z.string().nullable().optional(),
+  position: z.string().nullable().optional(),
+});
+
+export const tradeDraftPickSchema = z.object({
+  season: z.string().optional(),
+  round: z.number().optional(),
+  roster_id: z.number().optional(),
+  previous_owner_id: z.number().optional(),
+  owner_id: z.number().optional(),
+});
+
+export const tradeSchema = z.object({
+  transaction_id: z.string(),
+  league_id: z.string(),
+  league_name: z.string().optional(),
+  season: z.number().optional(),
+  status: z.string(),
+  created_at: z.number(),
+  roster_ids: z.array(z.number()).optional(),
+  adds: z.record(z.string(), z.string()).nullable().optional(),
+  drops: z.record(z.string(), z.string()).nullable().optional(),
+  draft_picks: z.array(tradeDraftPickSchema).nullable().optional(),
+});
+
+export const tradesResponseSchema = z.object({
+  group_id: z.string(),
+  trades: z.array(tradeSchema),
+});
+
+export const playerSchema = z.object({
+  player_id: z.string(),
+  full_name: z.string().nullable().optional(),
+  first_name: z.string().nullable().optional(),
+  last_name: z.string().nullable().optional(),
+  position: z.string().nullable().optional(),
+  team: z.string().nullable().optional(),
+  status: z.string().nullable().optional(),
+  age: z.number().nullable().optional(),
+  years_exp: z.number().nullable().optional(),
+});
+
+export const playerExposureSchema = z.object({
+  player: playerSchema,
+  leagues_owned: z.number(),
+  total_leagues: z.number(),
+  exposure_pct: z.number(),
+  league_names: z.array(z.string()),
+});
+
+export const playerExposureResponseSchema = z.object({
+  username: z.string(),
+  total_leagues: z.number(),
+  exposures: z.array(playerExposureSchema),
+});
+
+export type Trade = z.infer<typeof tradeSchema>;
+export type TradesResponse = z.infer<typeof tradesResponseSchema>;
+export type Player = z.infer<typeof playerSchema>;
+export type PlayerExposure = z.infer<typeof playerExposureSchema>;
+export type PlayerExposureResponse = z.infer<typeof playerExposureResponseSchema>;

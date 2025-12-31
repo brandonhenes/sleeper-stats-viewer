@@ -5,6 +5,8 @@ import {
   syncResponseSchema,
   syncStatusSchema,
   h2hResponseSchema,
+  tradesResponseSchema,
+  playerExposureResponseSchema,
 } from './schema';
 
 export const errorSchemas = {
@@ -91,6 +93,33 @@ export const api = {
       }),
       responses: {
         200: h2hResponseSchema,
+        404: errorSchemas.notFound,
+        500: errorSchemas.internal
+      },
+    },
+
+    // GET /api/group/:groupId/trades
+    // Returns all trades for leagues in this group
+    trades: {
+      method: 'GET' as const,
+      path: '/api/group/:groupId/trades',
+      responses: {
+        200: tradesResponseSchema,
+        404: errorSchemas.notFound,
+        500: errorSchemas.internal
+      },
+    },
+
+    // GET /api/players/exposure?username=...
+    // Returns player exposure analysis across all leagues
+    playerExposure: {
+      method: 'GET' as const,
+      path: '/api/players/exposure',
+      input: z.object({
+        username: z.string()
+      }),
+      responses: {
+        200: playerExposureResponseSchema,
         404: errorSchemas.notFound,
         500: errorSchemas.internal
       },

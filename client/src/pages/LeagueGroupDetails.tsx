@@ -1,9 +1,9 @@
 import { useParams, Link } from "wouter";
-import { useSleeperOverview, useH2h } from "@/hooks/use-sleeper";
+import { useSleeperOverview, useH2h, useTrades } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Loader2, Trophy, Target, TrendingUp } from "lucide-react";
+import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, ArrowRightLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Layout } from "@/components/Layout";
 import {
@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Trade } from "@shared/schema";
 
 export default function LeagueGroupDetails() {
   const params = useParams<{ groupId: string; username?: string }>();
@@ -23,6 +24,7 @@ export default function LeagueGroupDetails() {
 
   const { data: overviewData, isLoading: overviewLoading } = useSleeperOverview(username);
   const { data: h2hData, isLoading: h2hLoading, error: h2hError } = useH2h(groupId, username);
+  const { data: tradesData, isLoading: tradesLoading } = useTrades(groupId);
 
   const leagueGroup = overviewData?.league_groups.find((g) => g.group_id === groupId);
 
@@ -262,6 +264,105 @@ export default function LeagueGroupDetails() {
                   </Table>
                 </Card>
               </>
+            )}
+          </motion.div>
+
+          {/* Trades Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+            className="mt-8"
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <ArrowRightLeft className="w-6 h-6 text-primary" />
+              <h2 className="text-2xl font-display font-bold">Trade History</h2>
+            </div>
+
+            {tradesLoading && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="ml-3 text-muted-foreground">Loading trades...</span>
+              </div>
+            )}
+
+            {!tradesLoading && tradesData && tradesData.trades.length === 0 && (
+              <Card className="p-6 text-center text-muted-foreground">
+                <p>No trades found for this league.</p>
+                <p className="text-sm mt-1">Trades will appear here after syncing.</p>
+              </Card>
+            )}
+
+            {tradesData && tradesData.trades.length > 0 && (
+              <div className="space-y-4">
+                {tradesData.trades.slice(0, 20).map((trade: Trade) => (
+                  <Card key={trade.transaction_id} className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant="outline" className="text-xs">
+                            {trade.season}
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">
+                            {trade.league_name}
+                          </span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {trade.adds && Object.keys(trade.adds).length > 0 && (
+                            <div>
+                              <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Acquired</div>
+                              <div className="flex flex-wrap gap-1">
+                                {Object.entries(trade.adds).map(([playerId, info]: [string, any]) => (
+                                  <Badge key={playerId} variant="secondary">
+                                    {info?.name || playerId}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {trade.drops && Object.keys(trade.drops).length > 0 && (
+                            <div>
+                              <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Traded Away</div>
+                              <div className="flex flex-wrap gap-1">
+                                {Object.entries(trade.drops).map(([playerId, info]: [string, any]) => (
+                                  <Badge key={playerId} variant="outline">
+                                    {info?.name || playerId}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {trade.draft_picks && trade.draft_picks.length > 0 && (
+                          <div className="mt-2">
+                            <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Draft Picks</div>
+                            <div className="flex flex-wrap gap-1">
+                              {trade.draft_picks.map((pick, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs">
+                                  {pick.season} R{pick.round}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(trade.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+
+                {tradesData.trades.length > 20 && (
+                  <p className="text-center text-muted-foreground text-sm">
+                    Showing 20 of {tradesData.trades.length} trades
+                  </p>
+                )}
+              </div>
             )}
           </motion.div>
         </div>

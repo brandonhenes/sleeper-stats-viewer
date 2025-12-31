@@ -45,6 +45,14 @@ async function getMatchups(leagueId: string, week: number) {
   return jget(`${BASE}/league/${leagueId}/matchups/${week}`);
 }
 
+async function getLeagueTransactions(leagueId: string, week: number) {
+  return jget(`${BASE}/league/${leagueId}/transactions/${week}`);
+}
+
+async function getAllPlayers() {
+  return jget(`${BASE}/players/nfl`);
+}
+
 // Concurrency limiter
 async function withConcurrencyLimit<T>(
   items: T[],
@@ -313,6 +321,70 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
         console.error(`Error fetching users for league ${league.league_id}:`, err);
       }
     });
+
+    updateJob({ step: "trades", detail: "Fetching trade history..." });
+
+    // Fetch trades for each league (all weeks 1-18)
+    await withConcurrencyLimit(allLeagues, 6, async (league) => {
+      try {
+        // Fetch transactions for weeks 1-18 (regular season + playoffs)
+        for (let week = 1; week <= 18; week++) {
+          const transactions = await getLeagueTransactions(league.league_id, week);
+          if (!transactions || !Array.isArray(transactions)) continue;
+
+          // Filter for trades only (type = "trade")
+          const trades = transactions.filter((t: any) => t.type === "trade");
+          for (const trade of trades) {
+            cache.upsertTrade({
+              transaction_id: trade.transaction_id,
+              league_id: league.league_id,
+              status: trade.status || "complete",
+              created_at: trade.created || trade.status_updated || Date.now(),
+              roster_ids: trade.roster_ids ? JSON.stringify(trade.roster_ids) : null,
+              adds: trade.adds ? JSON.stringify(trade.adds) : null,
+              drops: trade.drops ? JSON.stringify(trade.drops) : null,
+              draft_picks: trade.draft_picks ? JSON.stringify(trade.draft_picks) : null,
+              waiver_budget: trade.waiver_budget ? JSON.stringify(trade.waiver_budget) : null,
+            });
+          }
+        }
+      } catch (err) {
+        console.error(`Error fetching trades for league ${league.league_id}:`, err);
+      }
+    });
+
+    updateJob({ step: "players", detail: "Syncing player database..." });
+
+    // Check if players database needs updating (once per day)
+    const playersLastUpdated = cache.getPlayersLastUpdated();
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    
+    if (!playersLastUpdated || Date.now() - playersLastUpdated > ONE_DAY) {
+      try {
+        const playersData = await getAllPlayers();
+        if (playersData) {
+          const playerIds = Object.keys(playersData);
+          for (const playerId of playerIds) {
+            const p = playersData[playerId];
+            if (p && typeof p === "object") {
+              cache.upsertPlayer({
+                player_id: playerId,
+                full_name: p.full_name || null,
+                first_name: p.first_name || null,
+                last_name: p.last_name || null,
+                position: p.position || null,
+                team: p.team || null,
+                status: p.status || null,
+                age: p.age || null,
+                years_exp: p.years_exp || null,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error syncing players:", err);
+      }
+    }
 
     updateJob({ step: "grouping", detail: "Computing league groups..." });
 
@@ -717,6 +789,164 @@ export async function registerRoutes(
       });
     } catch (e) {
       console.error("H2H error:", e);
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input" });
+      }
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/group/:groupId/trades - Get trades for a league group
+  app.get(api.sleeper.trades.path, async (req, res) => {
+    try {
+      const { groupId } = req.params;
+
+      // Get all leagues in this group
+      const allLeagues = cache.getAllLeaguesMap();
+      const groupLeagueIds = allLeagues
+        .filter((l) => {
+          const league = cache.getLeagueById(l.league_id);
+          return league?.group_id === groupId;
+        })
+        .map((l) => l.league_id);
+
+      if (groupLeagueIds.length === 0) {
+        return res.status(404).json({ message: "League group not found" });
+      }
+
+      // Get trades for all leagues in group
+      const trades: any[] = [];
+      for (const leagueId of groupLeagueIds) {
+        const leagueTrades = cache.getTradesForLeague(leagueId);
+        const league = cache.getLeagueById(leagueId);
+        
+        for (const trade of leagueTrades) {
+          // Parse adds and drops, resolve player names
+          const parsedAdds = trade.adds ? JSON.parse(trade.adds) : null;
+          const parsedDrops = trade.drops ? JSON.parse(trade.drops) : null;
+          
+          // Resolve player names for adds
+          const addsWithNames: Record<string, { player_id: string; name: string; roster_id: string }> = {};
+          if (parsedAdds && typeof parsedAdds === "object") {
+            for (const [playerId, rosterId] of Object.entries(parsedAdds)) {
+              const player = cache.getPlayer(playerId);
+              addsWithNames[playerId] = {
+                player_id: playerId,
+                name: player?.full_name || playerId,
+                roster_id: String(rosterId),
+              };
+            }
+          }
+          
+          // Resolve player names for drops
+          const dropsWithNames: Record<string, { player_id: string; name: string; roster_id: string }> = {};
+          if (parsedDrops && typeof parsedDrops === "object") {
+            for (const [playerId, rosterId] of Object.entries(parsedDrops)) {
+              const player = cache.getPlayer(playerId);
+              dropsWithNames[playerId] = {
+                player_id: playerId,
+                name: player?.full_name || playerId,
+                roster_id: String(rosterId),
+              };
+            }
+          }
+          
+          trades.push({
+            transaction_id: trade.transaction_id,
+            league_id: trade.league_id,
+            league_name: league?.name,
+            season: league?.season,
+            status: trade.status,
+            created_at: trade.created_at,
+            roster_ids: trade.roster_ids ? JSON.parse(trade.roster_ids) : [],
+            adds: Object.keys(addsWithNames).length > 0 ? addsWithNames : null,
+            drops: Object.keys(dropsWithNames).length > 0 ? dropsWithNames : null,
+            draft_picks: trade.draft_picks ? JSON.parse(trade.draft_picks) : null,
+          });
+        }
+      }
+
+      // Sort by created_at DESC
+      trades.sort((a, b) => b.created_at - a.created_at);
+
+      res.json({
+        group_id: groupId,
+        trades,
+      });
+    } catch (e) {
+      console.error("Trades error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/players/exposure - Get player exposure for a user
+  app.get(api.sleeper.playerExposure.path, async (req, res) => {
+    try {
+      const { username } = api.sleeper.playerExposure.input.parse(req.query);
+
+      const cachedUser = cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const userId = cachedUser.user_id;
+      const leagues = cache.getLeaguesForUser(userId);
+      
+      // Count player occurrences across leagues
+      const playerCounts = new Map<string, { count: number; leagueNames: string[] }>();
+      
+      for (const league of leagues) {
+        const roster = cache.getRosterForUserInLeague(league.league_id, userId);
+        if (!roster) continue;
+
+        // Get players from roster_players table
+        const stmt = cache.db.prepare(`SELECT player_id FROM roster_players WHERE league_id = ? AND owner_id = ?`);
+        const players = stmt.all(league.league_id, userId) as { player_id: string }[];
+
+        for (const { player_id } of players) {
+          if (!playerCounts.has(player_id)) {
+            playerCounts.set(player_id, { count: 0, leagueNames: [] });
+          }
+          const entry = playerCounts.get(player_id)!;
+          entry.count++;
+          entry.leagueNames.push(league.name);
+        }
+      }
+
+      const totalLeagues = leagues.length;
+
+      // Build exposure list
+      const exposures = Array.from(playerCounts.entries()).map(([playerId, { count, leagueNames }]) => {
+        const player = cache.getPlayer(playerId);
+        return {
+          player: {
+            player_id: playerId,
+            full_name: player?.full_name || null,
+            first_name: player?.first_name || null,
+            last_name: player?.last_name || null,
+            position: player?.position || null,
+            team: player?.team || null,
+            status: player?.status || null,
+            age: player?.age || null,
+            years_exp: player?.years_exp || null,
+          },
+          leagues_owned: count,
+          total_leagues: totalLeagues,
+          exposure_pct: totalLeagues > 0 ? Math.round((count / totalLeagues) * 100) : 0,
+          league_names: leagueNames,
+        };
+      });
+
+      // Sort by exposure_pct DESC
+      exposures.sort((a, b) => b.exposure_pct - a.exposure_pct);
+
+      res.json({
+        username,
+        total_leagues: totalLeagues,
+        exposures,
+      });
+    } catch (e) {
+      console.error("Player exposure error:", e);
       if (e instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid input" });
       }
