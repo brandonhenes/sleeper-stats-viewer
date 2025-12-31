@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSleeperOverview, useSleeperSync, useSyncStatus } from "@/hooks/use-sleeper";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -26,8 +26,31 @@ export default function Home() {
   const { data: syncStatus } = useSyncStatus(jobId || undefined, !!jobId);
 
   // Auto-trigger sync when needs_sync is true and no sync running
+  // Using a ref to track if we've already triggered auto-sync for this search
+  const autoSyncTriggeredRef = useRef(false);
+  
   useEffect(() => {
-    if (data && data.needs_sync && data.sync_status === "not_started" && searchQuery && !syncMutation.isPending && !jobId) {
+    // Reset auto-sync trigger when search query changes
+    autoSyncTriggeredRef.current = false;
+  }, [searchQuery]);
+  
+  useEffect(() => {
+    // Only auto-trigger sync once per search, when:
+    // - We have data
+    // - Data indicates sync is needed
+    // - No sync is currently running (status is "not_started")
+    // - We haven't already triggered auto-sync
+    // - No pending mutation or active job
+    if (
+      data &&
+      data.needs_sync === true &&
+      data.sync_status === "not_started" &&
+      searchQuery &&
+      !autoSyncTriggeredRef.current &&
+      !syncMutation.isPending &&
+      !jobId
+    ) {
+      autoSyncTriggeredRef.current = true;
       syncMutation.mutate(searchQuery, {
         onSuccess: (result) => {
           setJobId(result.job_id);
@@ -41,7 +64,7 @@ export default function Home() {
         },
       });
     }
-  }, [data?.needs_sync, data?.sync_status, searchQuery, syncMutation.isPending, jobId]);
+  }, [data, searchQuery, syncMutation.isPending, jobId, toast]);
 
   // Refetch when sync completes
   useEffect(() => {
