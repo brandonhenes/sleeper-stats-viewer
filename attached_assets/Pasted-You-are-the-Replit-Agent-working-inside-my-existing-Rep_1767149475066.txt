@@ -1,0 +1,126 @@
+You are the Replit Agent working inside my existing Replit project (Sleeper fantasy dashboard). Phase 1 already works: it pulls ALL my leagues from Sleeper and displays them, currently grouped by season (ex: “2025 Season” section headers). I have Replit Core.
+
+Your job: (A) adjust the UI/data so it shows one unified league list with the YEAR in each card title and (B) show my W–L record on each league card WITHOUT clicking into the league. Then (C) implement Phase 2: SQLite caching so the dashboard is fast and doesn’t hit Sleeper on every page load.
+
+IMPORTANT:
+- Do NOT rewrite the whole app. Make minimal, clean changes.
+- First, inspect the current codebase and identify:
+  1) where Sleeper API calls happen
+  2) where /api/overview (or equivalent) is defined
+  3) where the league cards are rendered
+- Keep the current styling/theme. Only change what’s required.
+- Add concurrency limiting to avoid spamming Sleeper.
+
+────────────────────────────────────────────────────────────
+A) UI / DATA SHAPE CHANGE (NO MORE “2025 Season” SECTIONS)
+────────────────────────────────────────────────────────────
+Current: leagues are grouped by season header.
+Target: a single list/grid of league cards, sorted and with year shown per card.
+
+Requirements:
+1) Flatten leagues across seasons into a single array.
+2) Sorting:
+   - Primary: league name A→Z
+   - Secondary: season DESC (newer year first)
+3) Card title format:
+   - “{League Name} ({Season})” OR “{Season} — {League Name}”
+4) Remove (or stop rendering) the big “2025 Season” header sections.
+
+Acceptance check:
+- The dashboard shows a continuous list of leagues, not separated by season headings.
+- Each league card visibly includes its season/year in the title.
+
+────────────────────────────────────────────────────────────
+B) SHOW W–L ON EACH CARD (NO CLICK REQUIRED)
+────────────────────────────────────────────────────────────
+Sleeper leagues list endpoint does NOT contain W–L.
+You must fetch rosters per league and find MY roster by matching owner_id to my user_id.
+
+Requirements:
+1) Update the overview API response so each league object includes:
+   - my_record: { wins, losses, ties }
+   - (optional) my_roster_id
+2) Compute my_record by:
+   - GET /league/:league_id/rosters
+   - find roster where roster.owner_id === myUserId
+   - read roster.settings.wins/losses/ties (default to 0 if missing)
+3) Concurrency limit roster fetches (max 6 at a time) to avoid rate limiting.
+
+UI requirement:
+- Each card shows “Record: W-L” (or W-L-T if ties > 0).
+
+Acceptance check:
+- I can see my W–L (and ties if applicable) on every league card without clicking in.
+
+────────────────────────────────────────────────────────────
+C) PHASE 2 — SQLITE CACHING (FAST DASHBOARD)
+────────────────────────────────────────────────────────────
+Goal: Load the dashboard from SQLite most of the time. Only call Sleeper when syncing.
+
+Design:
+- Add a SQLite database file in-project (./sleeper.db).
+- Add a manual “Sync” action and/or auto-sync if data is stale.
+
+Implementation requirements:
+1) Add dependencies (Node):
+   - sqlite3
+   - sqlite (async/await wrapper)
+2) Create a db module (ex: /server/db.js or /db.js depending on structure) that:
+   - opens ./sleeper.db
+   - runs migrations / CREATE TABLE IF NOT EXISTS
+3) Tables (minimum viable):
+   - users(user_id TEXT PK, username TEXT, display_name TEXT, updated_at INTEGER)
+   - leagues(league_id TEXT PK, name TEXT, season INTEGER, sport TEXT, status TEXT, total_rosters INTEGER, previous_league_id TEXT, updated_at INTEGER)
+   - rosters(league_id TEXT, owner_id TEXT, roster_id INTEGER, wins INTEGER, losses INTEGER, ties INTEGER, updated_at INTEGER,
+            PRIMARY KEY (league_id, owner_id))
+   - roster_players(league_id TEXT, owner_id TEXT, player_id TEXT, updated_at INTEGER,
+                   PRIMARY KEY (league_id, owner_id, player_id))
+4) Add a sync endpoint:
+   - POST /api/sync?username=YOURNAME
+   Behavior:
+   a) fetch user by username, store/upsert into users
+   b) fetch leagues across seasons, flatten, upsert into leagues
+   c) for each league, fetch rosters, derive my_record, upsert into rosters
+   d) store current roster snapshot in roster_players (delete+replace per league+owner)
+   e) return summary counts (leagues_synced, rosters_synced, etc.)
+   f) use concurrency limiting for roster calls
+5) Update GET /api/overview?username=...:
+   - Prefer reading from SQLite:
+     - get user_id by username from users table
+     - join leagues + rosters for that user_id
+     - return leagues array with my_record attached
+   - If user not found OR data is stale (ex: updated_at older than 12 hours), respond with a clear message and/or trigger sync logic (choose one approach and document it in comments).
+6) Add UI “Sync Now” button:
+   - calls POST /api/sync?username=...
+   - shows a toast/status (success/error) and refreshes overview afterward
+
+Acceptance check:
+- First load after sync is fast.
+- Refreshing the dashboard does NOT re-call Sleeper constantly.
+- “Sync Now” updates records correctly.
+
+────────────────────────────────────────────────────────────
+QUALITY / EDGE CASES
+────────────────────────────────────────────────────────────
+- If a league has no roster match for the user_id, set my_record to 0-0-0 and still render the league.
+- Handle HTTP errors gracefully (show error message, do not crash).
+- Keep existing styling and layout.
+- Add brief comments where the logic is non-obvious.
+
+────────────────────────────────────────────────────────────
+DELIVERABLES
+────────────────────────────────────────────────────────────
+1) Modify existing backend routes to:
+   - return flattened leagues with season in each object
+   - include my_record
+   - add SQLite + /api/sync
+2) Modify frontend:
+   - remove season-section grouping UI
+   - add season/year into card title
+   - display record on card
+   - add “Sync Now” button
+3) Provide a short “How to run/test in Replit” note:
+   - which URL(s) to hit
+   - expected JSON shape for /api/overview
+
+Proceed now: inspect the current project structure and implement the above with minimal changes.

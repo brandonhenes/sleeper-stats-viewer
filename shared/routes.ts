@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { 
   overviewResponseSchema, 
-  leagueDetailsResponseSchema 
+  leagueDetailsResponseSchema,
+  syncResponseSchema
 } from './schema';
 
 export const errorSchemas = {
@@ -37,6 +38,19 @@ export const api = {
       path: '/api/league/:leagueId',
       responses: {
         200: leagueDetailsResponseSchema,
+        404: errorSchemas.notFound,
+        500: errorSchemas.internal
+      },
+    },
+    sync: {
+      method: 'POST' as const,
+      path: '/api/sync',
+      input: z.object({
+        username: z.string()
+      }),
+      responses: {
+        200: syncResponseSchema,
+        400: errorSchemas.validation,
         404: errorSchemas.notFound,
         500: errorSchemas.internal
       },

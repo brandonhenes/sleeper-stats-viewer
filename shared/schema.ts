@@ -12,6 +12,26 @@ export const sleeperUserSchema = z.object({
   avatar: z.string().nullable().optional(),
 });
 
+// Record type for W-L-T
+export const myRecordSchema = z.object({
+  wins: z.number(),
+  losses: z.number(),
+  ties: z.number(),
+});
+
+// Extended league schema with my_record for the flattened list
+export const leagueWithRecordSchema = z.object({
+  league_id: z.string(),
+  name: z.string(),
+  season: z.string(),
+  status: z.string(),
+  sport: z.string(),
+  total_rosters: z.number().optional(),
+  my_record: myRecordSchema.optional(),
+  my_roster_id: z.number().optional(),
+});
+
+// Original league schema (kept for backwards compatibility)
 export const leagueSchema = z.object({
   league_id: z.string(),
   name: z.string(),
@@ -40,10 +60,12 @@ export const rosterSchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 
-// Request/Response Schemas for our internal API
+// Updated overview response with flat leagues array and optional cached info
 export const overviewResponseSchema = z.object({
   user: sleeperUserSchema,
-  leaguesBySeason: z.record(z.array(leagueSchema)),
+  leagues: z.array(leagueWithRecordSchema),
+  cached: z.boolean().optional(),
+  lastSyncedAt: z.number().optional(), // Unix timestamp
 });
 
 export const leagueDetailsResponseSchema = z.object({
@@ -52,9 +74,20 @@ export const leagueDetailsResponseSchema = z.object({
   rosters: z.array(rosterSchema),
 });
 
+// Sync response schema
+export const syncResponseSchema = z.object({
+  success: z.boolean(),
+  leaguesSynced: z.number(),
+  rostersSynced: z.number(),
+  message: z.string().optional(),
+});
+
 export type SleeperUser = z.infer<typeof sleeperUserSchema>;
 export type League = z.infer<typeof leagueSchema>;
+export type LeagueWithRecord = z.infer<typeof leagueWithRecordSchema>;
+export type MyRecord = z.infer<typeof myRecordSchema>;
 export type LeagueUser = z.infer<typeof leagueUserSchema>;
 export type Roster = z.infer<typeof rosterSchema>;
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
 export type LeagueDetailsResponse = z.infer<typeof leagueDetailsResponseSchema>;
+export type SyncResponse = z.infer<typeof syncResponseSchema>;
