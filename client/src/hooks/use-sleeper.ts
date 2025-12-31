@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 
 // GET /api/overview?username=...
@@ -7,9 +7,6 @@ export function useSleeperOverview(username: string | undefined) {
     queryKey: [api.sleeper.overview.path, username],
     queryFn: async () => {
       if (!username) return null;
-      // We pass username as a query param manually since buildUrl handles path params
-      // but the route definition defines 'input' which implies validation.
-      // However, for GET requests with query params, we construct the URL string.
       const url = `${api.sleeper.overview.path}?username=${encodeURIComponent(username)}`;
       
       const res = await fetch(url);
@@ -22,6 +19,29 @@ export function useSleeperOverview(username: string | undefined) {
     },
     enabled: !!username && username.length > 0,
     staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+// POST /api/sync?username=...
+export function useSleeperSync() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async (username: string) => {
+      const url = `${api.sleeper.sync.path}?username=${encodeURIComponent(username)}`;
+      const res = await fetch(url, { method: "POST" });
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("User not found");
+        throw new Error("Sync failed");
+      }
+      
+      return api.sleeper.sync.responses[200].parse(await res.json());
+    },
+    onSuccess: (_, username) => {
+      // Invalidate overview query to refresh data
+      queryClient.invalidateQueries({ queryKey: [api.sleeper.overview.path, username] });
+    },
   });
 }
 
