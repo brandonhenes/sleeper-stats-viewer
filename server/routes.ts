@@ -363,23 +363,20 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
       try {
         const playersData = await getAllPlayers();
         if (playersData) {
-          const playerIds = Object.keys(playersData);
-          for (const playerId of playerIds) {
-            const p = playersData[playerId];
-            if (p && typeof p === "object") {
-              await cache.upsertPlayer({
-                player_id: playerId,
-                full_name: p.full_name || null,
-                first_name: p.first_name || null,
-                last_name: p.last_name || null,
-                position: p.position || null,
-                team: p.team || null,
-                status: p.status || null,
-                age: p.age || null,
-                years_exp: p.years_exp || null,
-              });
-            }
-          }
+          const playersList = Object.entries(playersData)
+            .filter(([, p]) => p && typeof p === "object")
+            .map(([playerId, p]: [string, any]) => ({
+              player_id: playerId,
+              full_name: p.full_name || null,
+              first_name: p.first_name || null,
+              last_name: p.last_name || null,
+              position: p.position || null,
+              team: p.team || null,
+              status: p.status || null,
+              age: p.age || null,
+              years_exp: p.years_exp || null,
+            }));
+          await cache.bulkUpsertPlayers(playersList);
         }
       } catch (err) {
         console.error("Error syncing players:", err);

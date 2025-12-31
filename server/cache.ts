@@ -545,6 +545,54 @@ export const cache = {
     return result[0]?.last_updated || null;
   },
 
+  async bulkUpsertPlayers(players: Array<{
+    player_id: string;
+    full_name?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    position?: string | null;
+    team?: string | null;
+    status?: string | null;
+    age?: number | null;
+    years_exp?: number | null;
+  }>): Promise<void> {
+    const now = Date.now();
+    const BATCH_SIZE = 500;
+    
+    for (let i = 0; i < players.length; i += BATCH_SIZE) {
+      const batch = players.slice(i, i + BATCH_SIZE);
+      const values = batch.map(player => ({
+        player_id: player.player_id,
+        full_name: player.full_name || null,
+        first_name: player.first_name || null,
+        last_name: player.last_name || null,
+        position: player.position || null,
+        team: player.team || null,
+        status: player.status || null,
+        age: player.age || null,
+        years_exp: player.years_exp || null,
+        updated_at: now,
+      }));
+      
+      await db.insert(schema.players_master)
+        .values(values)
+        .onConflictDoUpdate({
+          target: schema.players_master.player_id,
+          set: {
+            full_name: sql`EXCLUDED.full_name`,
+            first_name: sql`EXCLUDED.first_name`,
+            last_name: sql`EXCLUDED.last_name`,
+            position: sql`EXCLUDED.position`,
+            team: sql`EXCLUDED.team`,
+            status: sql`EXCLUDED.status`,
+            age: sql`EXCLUDED.age`,
+            years_exp: sql`EXCLUDED.years_exp`,
+            updated_at: sql`EXCLUDED.updated_at`,
+          },
+        });
+    }
+  },
+
   async getRosterPlayersForUserInLeague(leagueId: string, ownerId: string): Promise<{ player_id: string }[]> {
     const result = await db.select({ player_id: schema.roster_players.player_id })
       .from(schema.roster_players)
