@@ -3,8 +3,9 @@ import { useSleeperOverview, useH2h } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeft, Loader2, Trophy, Target, TrendingUp } from "lucide-react";
 import { motion } from "framer-motion";
+import { Layout } from "@/components/Layout";
 import {
   Table,
   TableBody,
@@ -13,57 +14,57 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useState, useEffect } from "react";
 
 export default function LeagueGroupDetails() {
-  const { groupId } = useParams<{ groupId: string }>();
-  const [username, setUsername] = useState<string | undefined>();
+  const params = useParams<{ groupId: string; username?: string }>();
+  const groupId = params.groupId;
   
-  // Get username from localStorage (set when user searches)
-  useEffect(() => {
-    const stored = localStorage.getItem("sleeper_username");
-    if (stored) {
-      setUsername(stored);
-    }
-  }, []);
+  const username = params.username || localStorage.getItem("sleeper_username") || undefined;
 
   const { data: overviewData, isLoading: overviewLoading } = useSleeperOverview(username);
   const { data: h2hData, isLoading: h2hLoading, error: h2hError } = useH2h(groupId, username);
 
-  // Find the league group from overview data
   const leagueGroup = overviewData?.league_groups.find((g) => g.group_id === groupId);
+
+  const backLink = username ? `/u/${username}` : "/";
 
   if (!username) {
     return (
-      <div className="min-h-screen bg-background text-foreground p-8">
-        <div className="max-w-4xl mx-auto text-center py-20">
-          <p className="text-xl text-muted-foreground">Please search for a username first.</p>
-          <Link href="/">
-            <Button className="mt-4">Go Home</Button>
-          </Link>
+      <Layout>
+        <div className="min-h-screen p-8">
+          <div className="max-w-4xl mx-auto text-center py-20">
+            <p className="text-xl text-muted-foreground">Please search for a username first.</p>
+            <Link href="/">
+              <Button className="mt-4">Go Home</Button>
+            </Link>
+          </div>
         </div>
-      </div>
+      </Layout>
     );
   }
 
   if (overviewLoading) {
     return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center">
-        <Loader2 className="w-12 h-12 animate-spin text-primary" />
-      </div>
+      <Layout username={username}>
+        <div className="min-h-screen flex items-center justify-center">
+          <Loader2 className="w-12 h-12 animate-spin text-primary" />
+        </div>
+      </Layout>
     );
   }
 
   if (!leagueGroup) {
     return (
-      <div className="min-h-screen bg-background text-foreground p-8">
-        <div className="max-w-4xl mx-auto text-center py-20">
-          <p className="text-xl text-muted-foreground">League group not found.</p>
-          <Link href="/">
-            <Button className="mt-4">Go Home</Button>
-          </Link>
+      <Layout username={username}>
+        <div className="min-h-screen p-8">
+          <div className="max-w-4xl mx-auto text-center py-20">
+            <p className="text-xl text-muted-foreground">League group not found.</p>
+            <Link href={backLink}>
+              <Button className="mt-4">Go Back</Button>
+            </Link>
+          </div>
         </div>
-      </div>
+      </Layout>
     );
   }
 
@@ -81,187 +82,190 @@ export default function LeagueGroupDetails() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground pb-20">
-      {/* Header */}
-      <div className="bg-secondary/30 border-b border-border/50 p-6">
-        <div className="max-w-6xl mx-auto">
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="mb-4 gap-2">
-              <ArrowLeft className="w-4 h-4" />
-              Back to Dashboard
-            </Button>
-          </Link>
-          
-          <div className="flex flex-col md:flex-row md:items-center gap-4">
-            <div className="flex-1">
-              <h1 className="text-3xl font-display font-bold">{leagueGroup.name}</h1>
-              <p className="text-muted-foreground mt-1">
-                {leagueGroup.min_season === leagueGroup.max_season 
-                  ? `Season ${leagueGroup.min_season}`
-                  : `${leagueGroup.min_season} - ${leagueGroup.max_season}`
-                } ({leagueGroup.seasons_count} season{leagueGroup.seasons_count !== 1 ? 's' : ''})
-              </p>
-            </div>
+    <Layout username={username}>
+      <div className="pb-20">
+        <div className="bg-secondary/30 border-b border-border/50 p-6">
+          <div className="max-w-6xl mx-auto">
+            <Link href={backLink}>
+              <Button variant="ghost" size="sm" className="mb-4 gap-2">
+                <ArrowLeft className="w-4 h-4" />
+                Back to Profile
+              </Button>
+            </Link>
             
-            <div className="flex gap-4">
-              <Card className="p-4 text-center">
-                <div className="text-2xl font-bold font-mono">
-                  {formatRecord(
-                    leagueGroup.overall_record.wins,
-                    leagueGroup.overall_record.losses,
-                    leagueGroup.overall_record.ties
+            <div className="flex flex-col md:flex-row md:items-center gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <h1 className="text-3xl font-display font-bold">{leagueGroup.name}</h1>
+                  {leagueGroup.league_type && (
+                    <Badge variant="outline" className="capitalize">
+                      {leagueGroup.league_type}
+                    </Badge>
                   )}
                 </div>
-                <div className="text-xs text-muted-foreground uppercase tracking-wider">Official Record</div>
-              </Card>
-              <Card className="p-4 text-center">
-                <div className="text-2xl font-bold font-mono">
-                  {winPct(
-                    leagueGroup.overall_record.wins,
-                    leagueGroup.overall_record.losses,
-                    leagueGroup.overall_record.ties
-                  )}%
-                </div>
-                <div className="text-xs text-muted-foreground uppercase tracking-wider">Win Rate</div>
-              </Card>
+                <p className="text-muted-foreground mt-1">
+                  {leagueGroup.min_season === leagueGroup.max_season 
+                    ? `Season ${leagueGroup.min_season}`
+                    : `${leagueGroup.min_season} - ${leagueGroup.max_season}`
+                  } ({leagueGroup.seasons_count} season{leagueGroup.seasons_count !== 1 ? 's' : ''})
+                </p>
+              </div>
+              
+              <div className="flex gap-4">
+                <Card className="p-4 text-center">
+                  <div className="text-2xl font-bold font-mono">
+                    {formatRecord(
+                      leagueGroup.overall_record.wins,
+                      leagueGroup.overall_record.losses,
+                      leagueGroup.overall_record.ties
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Official Record</div>
+                </Card>
+                <Card className="p-4 text-center">
+                  <div className="text-2xl font-bold font-mono">
+                    {winPct(
+                      leagueGroup.overall_record.wins,
+                      leagueGroup.overall_record.losses,
+                      leagueGroup.overall_record.ties
+                    )}%
+                  </div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Win Rate</div>
+                </Card>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Content */}
-      <div className="max-w-6xl mx-auto p-6">
-        {/* H2H Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          <div className="flex items-center gap-3 mb-6">
-            <Target className="w-6 h-6 text-primary" />
-            <h2 className="text-2xl font-display font-bold">Head-to-Head Records</h2>
-          </div>
-
-          {h2hLoading && (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              <span className="ml-3 text-muted-foreground">Computing head-to-head records...</span>
+        <div className="max-w-6xl mx-auto p-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <Target className="w-6 h-6 text-primary" />
+              <h2 className="text-2xl font-display font-bold">Head-to-Head Records</h2>
             </div>
-          )}
 
-          {h2hError && (
-            <Card className="p-6 text-center text-muted-foreground">
-              <p>Failed to load head-to-head data.</p>
-              <p className="text-sm mt-1">{h2hError instanceof Error ? h2hError.message : "Unknown error"}</p>
-            </Card>
-          )}
-
-          {h2hData && (
-            <>
-              {/* H2H Summary */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <Card className="p-4">
-                  <div className="flex items-center gap-3">
-                    <Trophy className="w-5 h-5 text-accent" />
-                    <div>
-                      <div className="text-xl font-bold font-mono">
-                        {formatRecord(
-                          h2hData.h2h_overall.wins,
-                          h2hData.h2h_overall.losses,
-                          h2hData.h2h_overall.ties
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground">H2H Overall</div>
-                    </div>
-                  </div>
-                </Card>
-                <Card className="p-4">
-                  <div className="flex items-center gap-3">
-                    <TrendingUp className="w-5 h-5 text-green-500" />
-                    <div>
-                      <div className="text-xl font-bold">{h2hData.opponents.length}</div>
-                      <div className="text-xs text-muted-foreground">Opponents Faced</div>
-                    </div>
-                  </div>
-                </Card>
-                <Card className="p-4">
-                  <div className="flex items-center gap-3">
-                    <Target className="w-5 h-5 text-accent" />
-                    <div>
-                      <div className="text-xl font-bold">
-                        {h2hData.opponents.reduce((acc, o) => acc + o.games, 0)}
-                      </div>
-                      <div className="text-xs text-muted-foreground">Total Games</div>
-                    </div>
-                  </div>
-                </Card>
+            {h2hLoading && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="ml-3 text-muted-foreground">Computing head-to-head records...</span>
               </div>
+            )}
 
-              {/* Note about official vs H2H record */}
-              {(h2hData.h2h_overall.wins !== leagueGroup.overall_record.wins ||
-                h2hData.h2h_overall.losses !== leagueGroup.overall_record.losses) && (
-                <div className="mb-4 p-3 rounded-lg bg-accent/10 border border-accent/20 text-sm text-muted-foreground">
-                  Note: Official record differs from H2H total. This is likely due to median-match scoring or bye weeks.
-                </div>
-              )}
-
-              {/* Opponents Table */}
-              <Card>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Opponent</TableHead>
-                      <TableHead className="text-center">Record</TableHead>
-                      <TableHead className="text-center">Win %</TableHead>
-                      <TableHead className="text-center">Games</TableHead>
-                      <TableHead className="text-right">PF</TableHead>
-                      <TableHead className="text-right">PA</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {h2hData.opponents.map((opp) => {
-                      const oppWinPct = opp.games > 0 
-                        ? ((opp.wins + opp.ties * 0.5) / opp.games * 100).toFixed(1)
-                        : "0.0";
-                      const isWinning = opp.wins > opp.losses;
-                      const isLosing = opp.losses > opp.wins;
-                      
-                      return (
-                        <TableRow key={opp.opp_owner_id}>
-                          <TableCell>
-                            <div>
-                              <div className="font-medium">{opp.display_name || "Unknown"}</div>
-                              {opp.team_name && (
-                                <div className="text-xs text-muted-foreground">{opp.team_name}</div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center font-mono">
-                            <Badge 
-                              variant={isWinning ? "default" : isLosing ? "secondary" : "outline"}
-                              className={isWinning ? "bg-green-500/15 text-green-400" : ""}
-                            >
-                              {formatRecord(opp.wins, opp.losses, opp.ties)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <span className={isWinning ? "text-green-400" : isLosing ? "text-red-400" : ""}>
-                              {oppWinPct}%
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-center">{opp.games}</TableCell>
-                          <TableCell className="text-right font-mono">{opp.pf.toFixed(1)}</TableCell>
-                          <TableCell className="text-right font-mono">{opp.pa.toFixed(1)}</TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+            {h2hError && (
+              <Card className="p-6 text-center text-muted-foreground">
+                <p>Failed to load head-to-head data.</p>
+                <p className="text-sm mt-1">{h2hError instanceof Error ? h2hError.message : "Unknown error"}</p>
               </Card>
-            </>
-          )}
-        </motion.div>
+            )}
+
+            {h2hData && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <Card className="p-4">
+                    <div className="flex items-center gap-3">
+                      <Trophy className="w-5 h-5 text-accent" />
+                      <div>
+                        <div className="text-xl font-bold font-mono">
+                          {formatRecord(
+                            h2hData.h2h_overall.wins,
+                            h2hData.h2h_overall.losses,
+                            h2hData.h2h_overall.ties
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">H2H Overall</div>
+                      </div>
+                    </div>
+                  </Card>
+                  <Card className="p-4">
+                    <div className="flex items-center gap-3">
+                      <TrendingUp className="w-5 h-5 text-green-500" />
+                      <div>
+                        <div className="text-xl font-bold">{h2hData.opponents.length}</div>
+                        <div className="text-xs text-muted-foreground">Opponents Faced</div>
+                      </div>
+                    </div>
+                  </Card>
+                  <Card className="p-4">
+                    <div className="flex items-center gap-3">
+                      <Target className="w-5 h-5 text-accent" />
+                      <div>
+                        <div className="text-xl font-bold">
+                          {h2hData.opponents.reduce((acc, o) => acc + o.games, 0)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Total Games</div>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {(h2hData.h2h_overall.wins !== leagueGroup.overall_record.wins ||
+                  h2hData.h2h_overall.losses !== leagueGroup.overall_record.losses) && (
+                  <div className="mb-4 p-3 rounded-lg bg-accent/10 border border-accent/20 text-sm text-muted-foreground">
+                    Note: Official record differs from H2H total. This is likely due to median-match scoring or bye weeks.
+                  </div>
+                )}
+
+                <Card>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Opponent</TableHead>
+                        <TableHead className="text-center">Record</TableHead>
+                        <TableHead className="text-center">Win %</TableHead>
+                        <TableHead className="text-center">Games</TableHead>
+                        <TableHead className="text-right">PF</TableHead>
+                        <TableHead className="text-right">PA</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {h2hData.opponents.map((opp) => {
+                        const oppWinPct = opp.games > 0 
+                          ? ((opp.wins + opp.ties * 0.5) / opp.games * 100).toFixed(1)
+                          : "0.0";
+                        const isWinning = opp.wins > opp.losses;
+                        const isLosing = opp.losses > opp.wins;
+                        
+                        return (
+                          <TableRow key={opp.opp_owner_id}>
+                            <TableCell>
+                              <div>
+                                <div className="font-medium">{opp.display_name || "Unknown"}</div>
+                                {opp.team_name && (
+                                  <div className="text-xs text-muted-foreground">{opp.team_name}</div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center font-mono">
+                              <Badge 
+                                variant={isWinning ? "default" : isLosing ? "secondary" : "outline"}
+                                className={isWinning ? "bg-green-500/15 text-green-400" : ""}
+                              >
+                                {formatRecord(opp.wins, opp.losses, opp.ties)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className={isWinning ? "text-green-400" : isLosing ? "text-red-400" : ""}>
+                                {oppWinPct}%
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">{opp.games}</TableCell>
+                            <TableCell className="text-right font-mono">{opp.pf.toFixed(1)}</TableCell>
+                            <TableCell className="text-right font-mono">{opp.pa.toFixed(1)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </Card>
+              </>
+            )}
+          </motion.div>
+        </div>
       </div>
-    </div>
+    </Layout>
   );
 }

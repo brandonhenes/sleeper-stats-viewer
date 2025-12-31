@@ -1,0 +1,328 @@
+You are the Replit Agent working inside my existing Replit project (Sleeper Stats Viewer). Phase 1 exists and renders league tiles + overall record and has Sync. I have Replit Core and want to publish this as a scouting/search tool for me + friends.
+
+DO NOT rewrite the app. Make minimal, clean changes. Preserve current styling/theme.
+
+FIRST: Inspect the repo and identify:
+- where Sleeper API calls are
+- current routes (/api/overview, /api/sync, etc.)
+- how tiles/cards are rendered
+- build/run commands and port usage (must use process.env.PORT)
+
+────────────────────────────────────────────────────────────
+GOAL (FINAL USER EXPERIENCE)
+────────────────────────────────────────────────────────────
+This is NOT a login app. It’s a scouting/search app.
+
+1) Home page has a Search bar: “Enter Sleeper username”
+2) Search navigates to a user profile page: /u/:username
+3) Profile page shows:
+   - Dynasty vs Redraft counts & filters
+   - overall official W-L-T and overall win%
+   - league history tiles (ONE per league history, not per season)
+4) Clicking a league history opens league detail:
+   - current roster (latest season)
+   - trade history for that user across that league history
+   - head-to-head record vs each opponent (aggregated across seasons)
+5) Top nav tabs: Profile | Players | Compare
+6) Players tab shows player exposure for the CURRENT viewed user (owned in X leagues, %, sortable)
+7) Compare view compares two users (or one user vs another) and shows tendencies/edges.
+
+Caching must be shared across all searched users and stored in Postgres.
+
+────────────────────────────────────────────────────────────
+ACCESS CONTROL (OPTIONAL CLUB DOOR PASSWORD)
+────────────────────────────────────────────────────────────
+Optional but recommended:
+- Replit Secret: ACCESS_CODE
+- If set, require entering access code before using the app
+- Store signed cookie so you don’t re-enter constantly
+- If not set, allow public access (dev convenience)
+
+This is NOT per-user auth.
+
+────────────────────────────────────────────────────────────
+RATE LIMITING / ABUSE PREVENTION
+────────────────────────────────────────────────────────────
+Because users can search any username, protect sync endpoints:
+
+- POST /api/sync/start?username=...
+  Rate limit:
+  - per IP: max 1 sync request / 30 seconds
+  - per username: cooldown 10 minutes unless force=true AND access gate is enabled
+
+Also: server-side mutex so only one sync job per username can run at a time.
+
+External call concurrency:
+- leagues/league detail/rosters/users: <= 6 concurrent
+- transactions: <= 2–4 concurrent
+- matchups (H2H): <= 2 concurrent
+
+────────────────────────────────────────────────────────────
+DATABASE (POSTGRES FOR PUBLISHED AUTOSCALE)
+────────────────────────────────────────────────────────────
+Use Replit Production DB (Postgres). Add DB module using DATABASE_URL.
+
+Schema (store raw JSON where helpful):
+
+1) sleeper_users
+- sleeper_user_id TEXT PRIMARY KEY
+- username TEXT UNIQUE
+- display_name TEXT
+- avatar TEXT
+- updated_at TIMESTAMP
+
+2) sync_jobs
+- id UUID PK
+- sleeper_user_id TEXT
+- username TEXT
+- status TEXT (queued|running|done|error)
+- step TEXT
+- detail TEXT
+- progress_json JSONB
+- started_at TIMESTAMP
+- updated_at TIMESTAMP
+- finished_at TIMESTAMP
+- error TEXT
+
+3) leagues
+- league_id TEXT PRIMARY KEY
+- sleeper_user_id TEXT   -- which viewed user this cache belongs to
+- name TEXT
+- season INT
+- sport TEXT
+- status TEXT
+- total_rosters INT
+- previous_league_id TEXT
+- group_id TEXT
+- raw_json JSONB
+- updated_at TIMESTAMP
+
+4) rosters
+- league_id TEXT
+- owner_id TEXT
+- roster_id INT
+- wins INT
+- losses INT
+- ties INT
+- fpts NUMERIC
+- fpts_against NUMERIC
+- players_json JSONB
+- updated_at TIMESTAMP
+PRIMARY KEY (league_id, owner_id)
+
+5) league_users
+- league_id TEXT
+- user_id TEXT
+- display_name TEXT
+- team_name TEXT
+- raw_json JSONB
+- updated_at TIMESTAMP
+PRIMARY KEY (league_id, user_id)
+
+6) trades
+- transaction_id TEXT PRIMARY KEY
+- league_id TEXT
+- week INT
+- type TEXT
+- status TEXT
+- created_at_ms BIGINT
+- raw_json JSONB
+- updated_at TIMESTAMP
+
+7) h2h_season
+- league_id TEXT
+- my_owner_id TEXT
+- opp_owner_id TEXT
+- wins INT
+- losses INT
+- ties INT
+- pf NUMERIC
+- pa NUMERIC
+- games INT
+- updated_at TIMESTAMP
+PRIMARY KEY (league_id, my_owner_id, opp_owner_id)
+
+8) players_master (cached map)
+- player_id TEXT PRIMARY KEY
+- full_name TEXT
+- position TEXT
+- team TEXT
+- raw_json JSONB
+- updated_at TIMESTAMP
+
+9) league_group_meta (user-scoped labels/overrides)
+- sleeper_user_id TEXT
+- group_id TEXT
+- league_type TEXT (dynasty|redraft|unknown)
+- forced_group_id TEXT NULL
+PRIMARY KEY (sleeper_user_id, group_id)
+
+Indexes:
+- leagues(sleeper_user_id, group_id)
+- rosters(owner_id)
+- trades(league_id, created_at_ms desc)
+- h2h_season(league_id, my_owner_id)
+
+────────────────────────────────────────────────────────────
+SYNC ARCHITECTURE (NO TIMEOUTS, HAS PROGRESS)
+────────────────────────────────────────────────────────────
+Do NOT block page loads on full sync.
+
+Endpoints:
+1) GET /api/profile?username=...
+   - returns cached profile summary immediately (even if empty)
+   - includes: needsSync, lastSynced, latestJob, and league_groups if available
+   - if no cached data exists: needsSync=true and UI auto-calls sync/start
+
+2) POST /api/sync/start?username=...
+   - quick response; creates/returns sync_job
+   - idempotent; if job running for that username, return existing job_id
+
+3) GET /api/sync/status/:jobId
+   - returns progress
+
+Core sync steps (update sync_jobs step/progress):
+A) Fetch Sleeper user by username, store in sleeper_users
+B) Fetch leagues across seasons (2017..current; configurable)
+C) For each league:
+   - fetch league detail (previous_league_id)
+   - fetch rosters (store viewed user roster + players snapshot)
+   - fetch league users (for opponent names)
+D) Compute group_id for each league by walking previous_league_id chain to root
+   - apply forced_group_id overrides if present
+E) Cache trades:
+   - for each league, loop weeks 0..18 (stop after 2 consecutive empty weeks)
+   - fetch transactions, keep type="trade"
+F) Cache players_master:
+   - fetch /players/nfl max once per 24h, store/update
+G) DONE
+
+IMPORTANT: do NOT compute head-to-head for every group during core sync.
+Compute head-to-head on-demand per group.
+
+────────────────────────────────────────────────────────────
+LEAGUE GROUPING (CONDENSE TILES)
+────────────────────────────────────────────────────────────
+Profile page shows ONE tile per group_id.
+
+Each tile shows:
+- name (most recent season)
+- years range (minSeason–maxSeason)
+- seasons count
+- aggregated official W-L-T (sum roster.settings for viewed user across seasons)
+- aggregated win% across seasons
+- league_type (dynasty|redraft|unknown) with filter chips at top
+
+Dynasty/Redraft:
+- derive best-effort from league.raw_json/settings
+- unknown if unclear
+- allow manual override (only when ACCESS_CODE gate is enabled)
+
+────────────────────────────────────────────────────────────
+LEAGUE DETAIL PAGE (/u/:username/league/:groupId)
+────────────────────────────────────────────────────────────
+Show:
+1) Summary (official overall + win%)
+2) Current roster (latest season league_id) with player names/pos/team
+3) Trades timeline across all seasons in group (involving viewed user's roster_id)
+4) Head-to-head vs opponents across all seasons:
+   Endpoint: GET /api/group/:groupId/h2h?username=...
+   - compute if stale/missing for seasons in group:
+     - matchups per week (1..22) stop after 2 empty weeks
+     - pair by matchup_id, compare points
+     - upsert into h2h_season
+   - aggregate across seasons into opponent rows and join names
+   - display Opponent | W-L-T | Games | Win% | PF | PA (sortable)
+   - also show H2H-only overall totals
+   - if official differs materially, display note about median/extra games
+
+────────────────────────────────────────────────────────────
+PLAYERS TAB (SCOUTING: USER EXPOSURE)
+────────────────────────────────────────────────────────────
+Players tab scoped to currently viewed username:
+- exposure from latest rosters for each league group
+- Player | Pos | Team | Leagues Owned | % Owned
+- Search + sort asc/desc
+
+Endpoint:
+- GET /api/players/exposure?username=...
+
+────────────────────────────────────────────────────────────
+COMPARE VIEW (NEW)
+────────────────────────────────────────────────────────────
+Add Compare tab in top nav and routes:
+- /compare (UI for selecting users)
+- /compare/:userA/:userB (results)
+
+UI requirements:
+1) Compare input:
+   - two username fields (A and B)
+   - a Compare button
+   - if profile data missing for either, auto-start sync jobs and show progress
+
+2) Compare results should include:
+
+A) Overview metrics (A vs B):
+- total league groups
+- overall official W-L-T
+- overall win%
+- trades count (total trades in cached history)
+- H2H aggressiveness proxy:
+  - trades per league group
+  - trades per season
+
+B) Player overlap and leverage:
+- “Shared players” list:
+  Player | Owned by A? | Owned by B? | A leagues | B leagues | delta
+- “Most unique to A” (highest A% - B%)
+- “Most unique to B” (highest B% - A%)
+- Allow sorting by delta and by A%/B%
+
+C) Position exposure comparison:
+- % of owned players by position (QB/RB/WR/TE/K/DEF) for each user
+- show as table and simple bar visualization if the UI already supports charts (otherwise table only)
+
+D) Common league intersections:
+- Identify leagues where both users appear (same league_id or same league group if possible)
+- In those leagues, show:
+  - each user’s record in that league history
+  - optionally head-to-head record vs each other (only if matchup data computed; otherwise show “compute” button)
+
+Backend endpoints:
+1) GET /api/compare?userA=...&userB=...
+Return:
+- profile summaries for each (from cached DB)
+- exposure lists for each (from DB)
+- computed overlap arrays
+- trade counts for each
+
+IMPORTANT PERFORMANCE:
+- Compare must use cached DB data and should not force H2H computations except when:
+  - user opens a shared league detail or explicitly requests head-to-head vs each other.
+
+If either user has no cached data:
+- return needsSync flags for that user and UI triggers sync/start automatically.
+
+────────────────────────────────────────────────────────────
+DEPLOYMENT REQUIREMENTS
+────────────────────────────────────────────────────────────
+- Ensure server uses process.env.PORT
+- Ensure build/run commands succeed
+- Add README: required env/secrets: DATABASE_URL, ACCESS_CODE (optional)
+
+────────────────────────────────────────────────────────────
+ACCEPTANCE TESTS
+────────────────────────────────────────────────────────────
+1) Home search -> /u/henes35 loads cached fast after first sync
+2) First time searching a username auto-syncs with progress (no manual clicks required)
+3) Tiles condensed by league history (not per year)
+4) Dynasty/Redraft filters work
+5) League detail shows roster + trades + H2H table
+6) Players tab shows exposure list, sortable/searchable
+7) Compare view works:
+   - shows shared/unique players and deltas
+   - shows trade frequency metrics
+   - shows common leagues where both users play
+8) Rate limiting prevents sync spam; no Sleeper abuse.
+
+Proceed now: implement with minimal disruption.

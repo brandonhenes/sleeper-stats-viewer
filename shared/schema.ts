@@ -38,6 +38,7 @@ export const leagueGroupSchema = z.object({
   seasons_count: z.number(),
   overall_record: myRecordSchema, // aggregated W-L-T across all seasons
   league_ids: z.array(z.string()), // all league_ids in this group
+  league_type: z.enum(["dynasty", "redraft", "unknown"]).optional(), // derived from settings
 });
 
 // Original league schema (kept for backwards compatibility)

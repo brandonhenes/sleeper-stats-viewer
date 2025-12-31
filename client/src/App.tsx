@@ -5,13 +5,22 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
+import Profile from "@/pages/Profile";
 import LeagueDetails from "@/pages/LeagueDetails";
 import LeagueGroupDetails from "@/pages/LeagueGroupDetails";
+import Players from "@/pages/Players";
+import Compare from "@/pages/Compare";
+import CompareResults from "@/pages/CompareResults";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/u/:username" component={Profile} />
+      <Route path="/u/:username/league/:groupId" component={LeagueGroupDetails} />
+      <Route path="/players/:username" component={Players} />
+      <Route path="/compare" component={Compare} />
+      <Route path="/compare/:userA/:userB" component={CompareResults} />
       <Route path="/league/:id" component={LeagueDetails} />
       <Route path="/group/:groupId" component={LeagueGroupDetails} />
       <Route component={NotFound} />

@@ -139,6 +139,8 @@ function buildLeagueGroups(userId: string): LeagueGroup[] {
     let totalWins = 0, totalLosses = 0, totalTies = 0;
     const leagueIds: string[] = [];
 
+    let leagueType: "dynasty" | "redraft" | "unknown" = "unknown";
+    
     for (const league of groupLeagues) {
       leagueIds.push(league.league_id);
       const roster = rosterMap.get(league.league_id);
@@ -146,6 +148,28 @@ function buildLeagueGroups(userId: string): LeagueGroup[] {
         totalWins += roster.wins;
         totalLosses += roster.losses;
         totalTies += roster.ties;
+      }
+      
+      // Derive league type from raw_json settings
+      if (leagueType === "unknown" && league.raw_json) {
+        try {
+          const rawData = typeof league.raw_json === "string" 
+            ? JSON.parse(league.raw_json) 
+            : league.raw_json;
+          
+          // Sleeper API: settings.type - 0 = redraft, 2 = dynasty/keeper
+          if (rawData?.settings?.type === 2) {
+            leagueType = "dynasty";
+          } else if (rawData?.settings?.type === 0 || rawData?.settings?.type === 1) {
+            leagueType = "redraft";
+          }
+          // Also check if keeper_deadline is set (indicates keeper/dynasty)
+          if (rawData?.settings?.keeper_deadline && leagueType === "unknown") {
+            leagueType = "dynasty";
+          }
+        } catch {
+          // ignore parse errors
+        }
       }
     }
 
@@ -157,6 +181,7 @@ function buildLeagueGroups(userId: string): LeagueGroup[] {
       seasons_count: groupLeagues.length,
       overall_record: { wins: totalWins, losses: totalLosses, ties: totalTies },
       league_ids: leagueIds,
+      league_type: leagueType,
     });
   }
 

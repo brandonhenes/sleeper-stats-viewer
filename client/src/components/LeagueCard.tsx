@@ -8,9 +8,10 @@ import type { LeagueGroup } from "@shared/schema";
 interface LeagueGroupCardProps {
   group: LeagueGroup;
   index: number;
+  username?: string;
 }
 
-export function LeagueGroupCard({ group, index }: LeagueGroupCardProps) {
+export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps) {
   // Format W-L or W-L-T record
   const formatRecord = () => {
     const { wins, losses, ties } = group.overall_record;
@@ -28,8 +29,10 @@ export function LeagueGroupCard({ group, index }: LeagueGroupCardProps) {
     return `${group.min_season}-${group.max_season}`;
   };
 
+  const linkHref = username ? `/u/${username}/league/${group.group_id}` : `/group/${group.group_id}`;
+  
   return (
-    <Link href={`/group/${group.group_id}`} className="block h-full">
+    <Link href={linkHref} className="block h-full">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
