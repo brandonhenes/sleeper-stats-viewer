@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
+import { useEffect, useRef } from "react";
 
 // GET /api/overview?username=...
 export function useSleeperOverview(username: string | undefined) {
@@ -33,16 +34,84 @@ export function useSleeperSync() {
       
       if (!res.ok) {
         if (res.status === 404) throw new Error("User not found");
+        if (res.status === 429) {
+          const data = await res.json();
+          throw new Error(data.message || "Rate limited");
+        }
         throw new Error("Sync failed");
       }
       
       return api.sleeper.sync.responses[200].parse(await res.json());
     },
     onSuccess: (_, username) => {
-      // Invalidate overview query to refresh data
-      queryClient.invalidateQueries({ queryKey: [api.sleeper.overview.path, username] });
+      // Will refetch after polling completes
     },
   });
+}
+
+// GET /api/sync/status?job_id=...
+export function useSyncStatus(jobId: string | undefined, enabled: boolean = true) {
+  return useQuery({
+    queryKey: [api.sleeper.syncStatus.path, jobId],
+    queryFn: async () => {
+      if (!jobId) return null;
+      const url = `${api.sleeper.syncStatus.path}?job_id=${encodeURIComponent(jobId)}`;
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        throw new Error("Failed to fetch sync status");
+      }
+      
+      return api.sleeper.syncStatus.responses[200].parse(await res.json());
+    },
+    enabled: !!jobId && enabled,
+    refetchInterval: (query) => {
+      // Poll every 1s while running
+      const data = query.state.data;
+      if (data && data.status === "running") {
+        return 1000;
+      }
+      return false;
+    },
+  });
+}
+
+// Hook to auto-sync when needed and poll status
+export function useAutoSync(username: string | undefined, needsSync: boolean, syncStatus: string | undefined) {
+  const queryClient = useQueryClient();
+  const syncMutation = useSleeperSync();
+  const jobIdRef = useRef<string | null>(null);
+  
+  // Auto-trigger sync when needs_sync is true and no sync is running
+  useEffect(() => {
+    if (needsSync && username && syncStatus === "not_started" && !syncMutation.isPending) {
+      syncMutation.mutate(username, {
+        onSuccess: (data) => {
+          jobIdRef.current = data.job_id;
+        },
+      });
+    }
+  }, [needsSync, username, syncStatus, syncMutation.isPending]);
+  
+  // Poll sync status
+  const { data: statusData } = useSyncStatus(
+    jobIdRef.current || undefined,
+    !!jobIdRef.current
+  );
+  
+  // Refetch overview when sync completes
+  useEffect(() => {
+    if (statusData && statusData.status === "done" && username) {
+      queryClient.invalidateQueries({ queryKey: [api.sleeper.overview.path, username] });
+      jobIdRef.current = null;
+    }
+  }, [statusData?.status, username, queryClient]);
+  
+  return {
+    syncMutation,
+    syncStatus: statusData,
+    jobId: jobIdRef.current,
+  };
 }
 
 // GET /api/league/:leagueId
@@ -61,5 +130,25 @@ export function useLeagueDetails(leagueId: string) {
       return api.sleeper.league.responses[200].parse(await res.json());
     },
     enabled: !!leagueId,
+  });
+}
+
+// GET /api/group/:groupId/h2h?username=...
+export function useH2h(groupId: string | undefined, username: string | undefined) {
+  return useQuery({
+    queryKey: [api.sleeper.h2h.path, groupId, username],
+    queryFn: async () => {
+      if (!groupId || !username) return null;
+      const url = `${buildUrl(api.sleeper.h2h.path, { groupId })}?username=${encodeURIComponent(username)}`;
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("League group not found");
+        throw new Error("Failed to fetch H2H data");
+      }
+
+      return api.sleeper.h2h.responses[200].parse(await res.json());
+    },
+    enabled: !!groupId && !!username,
   });
 }

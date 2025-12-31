@@ -1,0 +1,247 @@
+You are the Replit Agent working inside my existing Replit project (Sleeper fantasy dashboard). Phase 1 works: it pulls all my Sleeper leagues and renders league tiles. I have Replit Core.
+
+I want you to implement “Phase 2.5”: make this reliable for me + friends, with caching + sane UX, WITHOUT creating a slow/timing-out first load.
+
+DO NOT rewrite the app. Make minimal, clean changes. Keep the current styling/theme. Add brief comments where logic is non-obvious.
+
+Before coding:
+1) Inspect the codebase and identify:
+   - where Sleeper API calls happen
+   - current /api/overview (or equivalent)
+   - current /api/sync (if present)
+   - where league tiles/cards are rendered
+
+────────────────────────────────────────────────────────────
+GOALS (WHAT THE USER SHOULD EXPERIENCE)
+────────────────────────────────────────────────────────────
+1) User enters username and sees results automatically:
+   - If cached data exists: show it immediately.
+   - If no cached data: auto-start sync and show a “Syncing…” state; no empty screen.
+2) Tile count is condensed:
+   - Show ONE tile per “league group” (a league across multiple seasons), not one per season.
+3) Each league group tile shows overall record across all years for that league group:
+   - Official record (from roster.settings) aggregated across seasons.
+4) Head-to-head record vs each opponent exists:
+   - Computed on-demand per league group (NOT on initial overview load), cached in SQLite.
+5) Be robust against known hiccups:
+   - some leagues won’t chain perfectly via previous_league_id
+   - median-match leagues cause official record ≠ H2H-only record
+   - playoffs/week ranges vary
+   - avoid rate-limit problems and SQLite locks
+
+────────────────────────────────────────────────────────────
+A) AUTO-SYNC WITHOUT TIMEOUTS (FIRST LOAD SHOULD NOT “RETURN NOTHING”)
+────────────────────────────────────────────────────────────
+Do NOT block GET /api/overview on a full sync. Instead implement this pattern:
+
+- GET /api/overview?username=...
+  - If user exists in DB and data not stale: return cached overview.
+  - If user missing OR stale:
+      - return cached overview if any, plus flags: { needs_sync: true, sync_status: "not_started"|"running"|"done"|"error" }
+      - If there is NO cached data for that username, return { needs_sync: true, sync_status:"not_started", leagues:[] } but UI must immediately trigger sync and show progress (no “nothing happens”).
+
+- POST /api/sync?username=...
+  - Starts a sync job (idempotent). Returns { job_id, status:"running" } quickly.
+  - Uses concurrency limiting for Sleeper calls.
+  - Writes results into SQLite.
+
+- GET /api/sync/status?job_id=...
+  - Returns progress: { status, step, counts, error? }
+
+Implementation: store sync jobs in SQLite so progress survives restarts.
+Also: enforce one sync job per username at a time (mutex/lock).
+
+Why: avoids long request timeouts and prevents the “blank until sync” problem while still making it automatic.
+
+────────────────────────────────────────────────────────────
+B) SQLITE TABLES (MINIMUM + ROBUSTNESS)
+────────────────────────────────────────────────────────────
+Use sqlite3 + sqlite packages.
+
+Create/ensure these tables:
+
+1) users
+- user_id TEXT PRIMARY KEY
+- username TEXT UNIQUE
+- display_name TEXT
+- updated_at INTEGER
+
+2) leagues  (store raw JSON too)
+- league_id TEXT PRIMARY KEY
+- name TEXT
+- season INTEGER
+- sport TEXT
+- status TEXT
+- total_rosters INTEGER
+- previous_league_id TEXT
+- group_id TEXT       -- computed root
+- raw_json TEXT       -- JSON.stringify(league)
+- updated_at INTEGER
+
+3) rosters
+- league_id TEXT
+- owner_id TEXT
+- roster_id INTEGER
+- wins INTEGER
+- losses INTEGER
+- ties INTEGER
+- fpts REAL
+- fpts_against REAL
+- updated_at INTEGER
+PRIMARY KEY (league_id, owner_id)
+
+4) league_users (for opponent display)
+- league_id TEXT
+- user_id TEXT
+- display_name TEXT
+- team_name TEXT
+- updated_at INTEGER
+PRIMARY KEY (league_id, user_id)
+
+5) sync_jobs
+- job_id TEXT PRIMARY KEY
+- username TEXT
+- status TEXT            -- running|done|error
+- step TEXT              -- e.g. user, leagues, rosters, users, grouping
+- detail TEXT            -- small status message
+- started_at INTEGER
+- updated_at INTEGER
+- error TEXT
+
+Add indexes:
+- leagues(group_id)
+- rosters(owner_id)
+- league_users(user_id)
+
+Set PRAGMAs:
+- WAL mode
+- busy_timeout (avoid SQLITE_BUSY)
+Wrap write-heavy sync phases in TRANSACTIONS.
+
+────────────────────────────────────────────────────────────
+C) “LEAGUE GROUPS” (CONDENSE 85 TILES DOWN TO ~32)
+────────────────────────────────────────────────────────────
+Right now the UI is showing one tile per league_id (per season). Change to one tile per group_id.
+
+Group logic:
+1) After syncing leagues for a user, compute group_id:
+   - for each league_id, follow previous_league_id repeatedly until null OR not found
+   - root_id = last found id
+   - set leagues.group_id = root_id for each league
+
+2) Some leagues won’t chain properly. Add a safe fallback:
+   - If a league has no previous_league_id and looks like a “new copy” of an existing league:
+     - Create a “possible merge” heuristic *ONLY* for display grouping:
+       - normalized name (lowercase, strip year tokens like 2024/2025)
+       - same total_rosters
+       - overlapping league_users user_ids >= 60%
+     - If heuristic match found, group under the most recent season’s root.
+   - If heuristic is too complex for now, implement a manual override table:
+       group_overrides(league_id PRIMARY KEY, forced_group_id TEXT)
+     and expose a tiny admin toggle later. (Implement overrides support even if UI for it is minimal.)
+
+Target output of overview should be league_groups:
+- group_id
+- name (use most recent season name)
+- years: minSeason, maxSeason
+- seasons_count
+- overall_record_official: wins/losses/ties summed across seasons (from rosters table)
+- has_median_mode: boolean if any season indicates median-match (derive from raw_json/settings if available; if unknown, omit)
+
+UI:
+- Render one tile per group
+- Title includes years: “League Name (2019–2025)”
+- Show overall official record: “Record: 88–64” (include ties if >0)
+
+────────────────────────────────────────────────────────────
+D) OVERALL RECORD SHOULD BE “OFFICIAL” AND CONSISTENT
+────────────────────────────────────────────────────────────
+Use roster.settings.wins/losses/ties from Sleeper rosters endpoint for each season league_id.
+Aggregate across all league_ids in the group.
+
+Important note:
+- Official record may include “league median” extra game formats.
+- That’s OK; it’s the official number we show on the overview tile.
+
+Do NOT compute head-to-head during overview load.
+
+────────────────────────────────────────────────────────────
+E) HEAD-TO-HEAD VS EACH OPPONENT (ON-DEMAND + CACHED)
+────────────────────────────────────────────────────────────
+Add table:
+
+h2h_games (or h2h_season_agg) — choose one approach:
+
+Option 1 (recommended): store aggregated per season league_id
+CREATE TABLE IF NOT EXISTS h2h_season (
+  league_id TEXT,
+  my_owner_id TEXT,
+  opp_owner_id TEXT,
+  wins INTEGER,
+  losses INTEGER,
+  ties INTEGER,
+  pf REAL,
+  pa REAL,
+  games INTEGER,
+  updated_at INTEGER,
+  PRIMARY KEY (league_id, my_owner_id, opp_owner_id)
+);
+
+Endpoint:
+- GET /api/group/:groupId/h2h?username=...&include_playoffs=false
+Behavior:
+1) Find all league_ids in group_id.
+2) If h2h missing/stale for any league_id, compute for just those league_ids:
+   - fetch rosters to map roster_id -> owner_id and find my roster_id
+   - fetch matchups per week:
+       GET /league/{league_id}/matchups/{week}
+     Loop weeks until:
+       - you’ve passed a sensible max (22) OR
+       - you get empty arrays for 2 consecutive weeks
+   - Determine opponent via matchup_id pairing
+   - Compare points to assign W/L/T
+   - Aggregate per opponent owner_id
+   - Upsert into h2h_season
+   - Concurrency limit matchup calls to 2 at a time.
+3) Aggregate across seasons in the group:
+   - sum W/L/T/PF/PA/games by opp_owner_id across league_ids
+4) Join opponent names using league_users from the MOST RECENT season in the group:
+   - show display_name and team_name if available
+
+UI:
+- In league group detail view: table
+  Opponent | W-L-T | Games | PF | PA
+- Sort by Games DESC then win% DESC
+
+Median-mode mismatch:
+- In the detail view, also compute and show:
+  - H2H-only overall (sum across opponents) so users understand why official != H2H.
+
+────────────────────────────────────────────────────────────
+F) RATE LIMITS, SAFETY, AND MULTI-FRIEND USE
+────────────────────────────────────────────────────────────
+1) Add basic rate limiting to POST /api/sync:
+   - per IP: e.g. 1 request / 30 seconds
+   - per username: do not allow sync more than once every 10 minutes unless forced flag is set by admin
+2) Add server-side mutex so only one sync job per username runs at a time.
+3) Concurrency limits:
+   - roster fetches: max 6 concurrent
+   - matchup fetches (H2H): max 2 concurrent
+4) Cache the big /players/nfl dictionary (if used):
+   - store in SQLite or local file with updated_at
+   - refresh at most once per 24 hours
+
+────────────────────────────────────────────────────────────
+DELIVERABLES / ACCEPTANCE TESTS
+────────────────────────────────────────────────────────────
+1) Typing username triggers automatic syncing flow:
+   - UI shows “Syncing…” and then loads tiles without manual sync clicks.
+2) Overview shows ~32 tiles (one per league group), not ~85.
+3) Each tile shows years range and overall official record across years.
+4) League group detail page shows head-to-head table vs opponents.
+5) No frequent SQLITE_BUSY errors; sync doesn’t crash if two friends load at once.
+6) Provide a short run/test note:
+   - which endpoints to hit
+   - expected JSON shape for overview and h2h
+
+Proceed: inspect the codebase and implement these changes with minimal disruption.

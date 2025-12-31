@@ -1,27 +1,35 @@
 import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Trophy, Users, Activity } from "lucide-react";
+import { Trophy, Users, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
-import type { LeagueWithRecord } from "@shared/schema";
+import type { LeagueGroup } from "@shared/schema";
 
-interface LeagueCardProps {
-  league: LeagueWithRecord;
+interface LeagueGroupCardProps {
+  group: LeagueGroup;
   index: number;
 }
 
-export function LeagueCard({ league, index }: LeagueCardProps) {
+export function LeagueGroupCard({ group, index }: LeagueGroupCardProps) {
   // Format W-L or W-L-T record
   const formatRecord = () => {
-    const { wins, losses, ties } = league.my_record || { wins: 0, losses: 0, ties: 0 };
+    const { wins, losses, ties } = group.overall_record;
     if (ties > 0) {
       return `${wins}-${losses}-${ties}`;
     }
     return `${wins}-${losses}`;
   };
 
+  // Format years range
+  const formatYears = () => {
+    if (group.min_season === group.max_season) {
+      return String(group.min_season);
+    }
+    return `${group.min_season}-${group.max_season}`;
+  };
+
   return (
-    <Link href={`/league/${league.league_id}`} className="block h-full">
+    <Link href={`/group/${group.group_id}`} className="block h-full">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -34,8 +42,10 @@ export function LeagueCard({ league, index }: LeagueCardProps) {
           
           <div className="relative z-10 flex flex-col h-full gap-4">
             <div className="flex justify-between items-start gap-2 flex-wrap">
-              <Badge variant={league.status === 'active' ? 'default' : 'secondary'} className={league.status === 'active' ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25' : ''}>
-                {league.status}
+              {/* Years badge */}
+              <Badge variant="secondary" className="gap-1">
+                <Calendar className="w-3 h-3" />
+                {formatYears()}
               </Badge>
               {/* W-L Record Badge */}
               <Badge variant="outline" className="bg-accent/20 text-accent-foreground border-accent/30 font-mono font-bold">
@@ -43,19 +53,19 @@ export function LeagueCard({ league, index }: LeagueCardProps) {
               </Badge>
             </div>
 
-            {/* League name with year */}
+            {/* League name */}
             <h3 className="text-xl font-display font-bold text-foreground group-hover:text-primary transition-colors line-clamp-2">
-              {league.name} <span className="text-muted-foreground font-normal">({league.season})</span>
+              {group.name}
             </h3>
 
             <div className="mt-auto grid grid-cols-2 gap-4 pt-4 border-t border-border/50">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Trophy className="w-4 h-4 text-accent" />
-                <span className="capitalize">{league.sport}</span>
+                <span>{group.seasons_count} Season{group.seasons_count !== 1 ? 's' : ''}</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Users className="w-4 h-4 text-accent" />
-                <span>{league.total_rosters} Teams</span>
+                <span>{group.league_ids.length} League{group.league_ids.length !== 1 ? 's' : ''}</span>
               </div>
             </div>
           </div>

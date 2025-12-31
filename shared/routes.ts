@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { 
   overviewResponseSchema, 
   leagueDetailsResponseSchema,
-  syncResponseSchema
+  syncResponseSchema,
+  syncStatusSchema,
+  h2hResponseSchema,
 } from './schema';
 
 export const errorSchemas = {
@@ -20,6 +22,8 @@ export const errorSchemas = {
 
 export const api = {
   sleeper: {
+    // GET /api/overview?username=...
+    // Returns cached data immediately with sync status flags
     overview: {
       method: 'GET' as const,
       path: '/api/overview',
@@ -33,6 +37,8 @@ export const api = {
         500: errorSchemas.internal
       },
     },
+
+    // GET /api/league/:leagueId
     league: {
       method: 'GET' as const,
       path: '/api/league/:leagueId',
@@ -42,6 +48,9 @@ export const api = {
         500: errorSchemas.internal
       },
     },
+
+    // POST /api/sync?username=...
+    // Starts a background sync job (non-blocking)
     sync: {
       method: 'POST' as const,
       path: '/api/sync',
@@ -51,6 +60,37 @@ export const api = {
       responses: {
         200: syncResponseSchema,
         400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+        429: z.object({ message: z.string() }), // rate limited
+        500: errorSchemas.internal
+      },
+    },
+
+    // GET /api/sync/status?job_id=...
+    // Returns sync job progress
+    syncStatus: {
+      method: 'GET' as const,
+      path: '/api/sync/status',
+      input: z.object({
+        job_id: z.string()
+      }),
+      responses: {
+        200: syncStatusSchema,
+        404: errorSchemas.notFound,
+        500: errorSchemas.internal
+      },
+    },
+
+    // GET /api/group/:groupId/h2h?username=...
+    // Returns head-to-head records vs each opponent (on-demand, cached)
+    h2h: {
+      method: 'GET' as const,
+      path: '/api/group/:groupId/h2h',
+      input: z.object({
+        username: z.string()
+      }),
+      responses: {
+        200: h2hResponseSchema,
         404: errorSchemas.notFound,
         500: errorSchemas.internal
       },
