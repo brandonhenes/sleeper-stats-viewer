@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { api } from "@shared/routes";
 import { z } from "zod";
-import cache, { type SyncJob } from "./cache";
+import { cache, type SyncJob } from "./cache";
 import type { LeagueGroup } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -78,18 +78,18 @@ async function withConcurrencyLimit<T>(
 }
 
 // Compute league groups by following previous_league_id chains
-function computeLeagueGroups(userId: string): void {
-  const leagues = cache.getLeaguesForUser(userId);
+async function computeLeagueGroups(userId: string): Promise<void> {
+  const leagues = await cache.getLeaguesForUser(userId);
   const leagueMap = new Map(leagues.map((l) => [l.league_id, l]));
 
   // Build a map from league_id to its root (following previous_league_id)
-  const findRoot = (leagueId: string): string => {
+  const findRoot = async (leagueId: string): Promise<string> => {
     let current = leagueId;
     const visited = new Set<string>();
 
     while (true) {
       // Check for manual override first
-      const override = cache.getGroupOverride(current);
+      const override = await cache.getGroupOverride(current);
       if (override) return override;
 
       const league = leagueMap.get(current);
@@ -109,17 +109,17 @@ function computeLeagueGroups(userId: string): void {
 
   // Assign group_id to each league
   for (const league of leagues) {
-    const groupId = findRoot(league.league_id);
+    const groupId = await findRoot(league.league_id);
     if (league.group_id !== groupId) {
-      cache.updateLeagueGroupId(league.league_id, groupId);
+      await cache.updateLeagueGroupId(league.league_id, groupId);
     }
   }
 }
 
 // Build league groups from cached data
-function buildLeagueGroups(userId: string): LeagueGroup[] {
-  const leagues = cache.getLeaguesForUser(userId);
-  const rosters = cache.getRostersForUser(userId);
+async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
+  const leagues = await cache.getLeaguesForUser(userId);
+  const rosters = await cache.getRostersForUser(userId);
   const rosterMap = new Map(rosters.map((r) => [r.league_id, r]));
 
   // Group leagues by group_id
@@ -200,26 +200,26 @@ function buildLeagueGroups(userId: string): LeagueGroup[] {
 
 // Background sync job runner
 async function runSyncJob(jobId: string, username: string): Promise<void> {
-  const updateJob = (updates: Partial<SyncJob>) => {
-    const existing = cache.getSyncJob(jobId);
+  const updateJob = async (updates: Partial<SyncJob>) => {
+    const existing = await cache.getSyncJob(jobId);
     if (existing) {
-      cache.upsertSyncJob({ ...existing, ...updates, updated_at: Date.now() });
+      await cache.upsertSyncJob({ ...existing, ...updates, updated_at: Date.now() });
     }
   };
 
   try {
-    updateJob({ step: "user", detail: "Fetching user info..." });
+    await updateJob({ step: "user", detail: "Fetching user info..." });
 
     // Fetch user from Sleeper
     const user = await getUserByUsername(username);
     if (!user) {
-      updateJob({ status: "error", error: "User not found on Sleeper" });
+      await updateJob({ status: "error", error: "User not found on Sleeper" });
       syncLocks.delete(username.toLowerCase());
       return;
     }
 
     // Upsert user into cache
-    cache.upsertUser({
+    await cache.upsertUser({
       user_id: user.user_id,
       username: user.username,
       display_name: user.display_name,
@@ -231,7 +231,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
     const startSeason = 2017;
     const endSeason = new Date().getFullYear() + 1;
 
-    updateJob({ step: "leagues", detail: "Fetching leagues..." });
+    await updateJob({ step: "leagues", detail: "Fetching leagues..." });
 
     // Fetch all seasons in parallel
     const seasons = [];
@@ -252,7 +252,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
 
     // Upsert all leagues
     for (const league of allLeagues) {
-      cache.upsertLeague(userId, {
+      await cache.upsertLeague(userId, {
         league_id: league.league_id,
         name: league.name,
         season: league.season,
@@ -264,7 +264,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
       });
     }
 
-    updateJob({
+    await updateJob({
       step: "rosters",
       detail: "Fetching rosters...",
       leagues_total: allLeagues.length,
@@ -281,7 +281,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
         // Store all rosters for opponent lookup later
         for (const r of rosters) {
           if (r.owner_id) {
-            cache.upsertRoster({
+            await cache.upsertRoster({
               league_id: league.league_id,
               owner_id: r.owner_id,
               roster_id: r.roster_id,
@@ -295,13 +295,13 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
         }
 
         rostersCount++;
-        updateJob({ leagues_done: rostersCount });
+        await updateJob({ leagues_done: rostersCount });
       } catch (err) {
         console.error(`Error fetching rosters for league ${league.league_id}:`, err);
       }
     });
 
-    updateJob({ step: "users", detail: "Fetching league members..." });
+    await updateJob({ step: "users", detail: "Fetching league members..." });
 
     // Fetch league users with concurrency limit
     await withConcurrencyLimit(allLeagues, 6, async (league) => {
@@ -310,7 +310,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
         if (!users) return;
 
         for (const u of users) {
-          cache.upsertLeagueUser({
+          await cache.upsertLeagueUser({
             league_id: league.league_id,
             user_id: u.user_id,
             display_name: u.display_name || u.username,
@@ -322,7 +322,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
       }
     });
 
-    updateJob({ step: "trades", detail: "Fetching trade history..." });
+    await updateJob({ step: "trades", detail: "Fetching trade history..." });
 
     // Fetch trades for each league (all weeks 1-18)
     await withConcurrencyLimit(allLeagues, 6, async (league) => {
@@ -335,7 +335,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
           // Filter for trades only (type = "trade")
           const trades = transactions.filter((t: any) => t.type === "trade");
           for (const trade of trades) {
-            cache.upsertTrade({
+            await cache.upsertTrade({
               transaction_id: trade.transaction_id,
               league_id: league.league_id,
               status: trade.status || "complete",
@@ -353,10 +353,10 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
       }
     });
 
-    updateJob({ step: "players", detail: "Syncing player database..." });
+    await updateJob({ step: "players", detail: "Syncing player database..." });
 
     // Check if players database needs updating (once per day)
-    const playersLastUpdated = cache.getPlayersLastUpdated();
+    const playersLastUpdated = await cache.getPlayersLastUpdated();
     const ONE_DAY = 24 * 60 * 60 * 1000;
     
     if (!playersLastUpdated || Date.now() - playersLastUpdated > ONE_DAY) {
@@ -367,7 +367,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
           for (const playerId of playerIds) {
             const p = playersData[playerId];
             if (p && typeof p === "object") {
-              cache.upsertPlayer({
+              await cache.upsertPlayer({
                 player_id: playerId,
                 full_name: p.full_name || null,
                 first_name: p.first_name || null,
@@ -386,12 +386,12 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
       }
     }
 
-    updateJob({ step: "grouping", detail: "Computing league groups..." });
+    await updateJob({ step: "grouping", detail: "Computing league groups..." });
 
     // Compute league groups
-    computeLeagueGroups(userId);
+    await computeLeagueGroups(userId);
 
-    updateJob({
+    await updateJob({
       status: "done",
       step: "done",
       detail: `Synced ${allLeagues.length} leagues`,
@@ -399,7 +399,7 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
     });
   } catch (err) {
     console.error("Sync job error:", err);
-    updateJob({
+    await updateJob({
       status: "error",
       error: err instanceof Error ? err.message : "Unknown error",
     });
@@ -420,9 +420,9 @@ export async function registerRoutes(
       const { username } = api.sleeper.overview.input.parse(req.query);
 
       // Check cache first
-      let cachedUser = cache.getUserByUsername(username);
-      const runningJob = cache.getRunningJobForUser(username);
-      const latestJob = cache.getLatestSyncJobForUser(username);
+      let cachedUser = await cache.getUserByUsername(username);
+      const runningJob = await cache.getRunningJobForUser(username);
+      const latestJob = await cache.getLatestSyncJobForUser(username);
 
       // Determine sync status
       let syncStatus: "not_started" | "running" | "done" | "error" = "not_started";
@@ -433,9 +433,9 @@ export async function registerRoutes(
       }
 
       if (cachedUser) {
-        const leagueGroups = buildLeagueGroups(cachedUser.user_id);
-        const lastSync = cache.getLastSyncTime(cachedUser.user_id);
-        const isStale = cache.isDataStale(cachedUser.user_id);
+        const leagueGroups = await buildLeagueGroups(cachedUser.user_id);
+        const lastSync = await cache.getLastSyncTime(cachedUser.user_id);
+        const isStale = await cache.isDataStale(cachedUser.user_id);
 
         return res.json({
           user: {
@@ -488,7 +488,7 @@ export async function registerRoutes(
       const usernameLower = username.toLowerCase();
 
       // Check if already running
-      const runningJob = cache.getRunningJobForUser(username);
+      const runningJob = await cache.getRunningJobForUser(username);
       if (runningJob) {
         return res.json({
           job_id: runningJob.job_id,
@@ -508,7 +508,7 @@ export async function registerRoutes(
 
       // Check in-memory lock
       if (syncLocks.get(usernameLower)) {
-        const existingJob = cache.getLatestSyncJobForUser(username);
+        const existingJob = await cache.getLatestSyncJobForUser(username);
         if (existingJob && existingJob.status === "running") {
           return res.json({
             job_id: existingJob.job_id,
@@ -535,7 +535,7 @@ export async function registerRoutes(
         error: null,
       };
 
-      cache.upsertSyncJob(job);
+      await cache.upsertSyncJob(job);
       syncLocks.set(usernameLower, true);
       lastSyncStart.set(usernameLower, now);
 
@@ -564,7 +564,7 @@ export async function registerRoutes(
     try {
       const { job_id } = api.sleeper.syncStatus.input.parse(req.query);
 
-      const job = cache.getSyncJob(job_id);
+      const job = await cache.getSyncJob(job_id);
       if (!job) {
         return res.status(404).json({ message: "Job not found" });
       }
@@ -614,13 +614,13 @@ export async function registerRoutes(
       const { groupId } = req.params;
       const { username } = api.sleeper.h2h.input.parse(req.query);
 
-      const cachedUser = cache.getUserByUsername(username);
+      const cachedUser = await cache.getUserByUsername(username);
       if (!cachedUser) {
         return res.status(404).json({ message: "User not found" });
       }
 
       const userId = cachedUser.user_id;
-      const leagues = cache.getLeaguesByGroupId(groupId, userId);
+      const leagues = await cache.getLeaguesByGroupId(groupId, userId);
 
       if (leagues.length === 0) {
         return res.status(404).json({ message: "League group not found" });
@@ -633,7 +633,7 @@ export async function registerRoutes(
 
       // For each league, compute H2H if not cached
       for (const league of leagues) {
-        let h2hRecords = cache.getH2hForLeague(league.league_id, userId);
+        let h2hRecords = await cache.getH2hForLeague(league.league_id, userId);
 
         // If no cached H2H data, compute it
         if (h2hRecords.length === 0) {
@@ -723,7 +723,7 @@ export async function registerRoutes(
           // Save to cache
           for (const entry of Array.from(seasonH2h.entries())) {
             const [oppId, record] = entry;
-            cache.upsertH2hSeason({
+            await cache.upsertH2hSeason({
               league_id: league.league_id,
               my_owner_id: userId,
               opp_owner_id: oppId,
@@ -731,7 +731,7 @@ export async function registerRoutes(
             });
           }
 
-          h2hRecords = cache.getH2hForLeague(league.league_id, userId);
+          h2hRecords = await cache.getH2hForLeague(league.league_id, userId);
         }
 
         // Aggregate into overall H2H
@@ -751,7 +751,7 @@ export async function registerRoutes(
 
       // Get opponent names from most recent season
       const mostRecentLeague = leagues[0];
-      const leagueUsers = cache.getLeagueUsers(mostRecentLeague.league_id);
+      const leagueUsers = await cache.getLeagueUsers(mostRecentLeague.league_id);
       const userMap = new Map(leagueUsers.map((u) => [u.user_id, u]));
 
       // Build response
@@ -802,13 +802,15 @@ export async function registerRoutes(
       const { groupId } = req.params;
 
       // Get all leagues in this group
-      const allLeagues = cache.getAllLeaguesMap();
-      const groupLeagueIds = allLeagues
-        .filter((l) => {
-          const league = cache.getLeagueById(l.league_id);
-          return league?.group_id === groupId;
-        })
-        .map((l) => l.league_id);
+      const allLeagues = await cache.getAllLeaguesMap();
+      const groupLeagueIds: string[] = [];
+      
+      for (const l of allLeagues) {
+        const league = await cache.getLeagueById(l.league_id);
+        if (league?.group_id === groupId) {
+          groupLeagueIds.push(l.league_id);
+        }
+      }
 
       if (groupLeagueIds.length === 0) {
         return res.status(404).json({ message: "League group not found" });
@@ -817,8 +819,8 @@ export async function registerRoutes(
       // Get trades for all leagues in group
       const trades: any[] = [];
       for (const leagueId of groupLeagueIds) {
-        const leagueTrades = cache.getTradesForLeague(leagueId);
-        const league = cache.getLeagueById(leagueId);
+        const leagueTrades = await cache.getTradesForLeague(leagueId);
+        const league = await cache.getLeagueById(leagueId);
         
         for (const trade of leagueTrades) {
           // Parse adds and drops, resolve player names
@@ -829,7 +831,7 @@ export async function registerRoutes(
           const addsWithNames: Record<string, { player_id: string; name: string; roster_id: string }> = {};
           if (parsedAdds && typeof parsedAdds === "object") {
             for (const [playerId, rosterId] of Object.entries(parsedAdds)) {
-              const player = cache.getPlayer(playerId);
+              const player = await cache.getPlayer(playerId);
               addsWithNames[playerId] = {
                 player_id: playerId,
                 name: player?.full_name || playerId,
@@ -842,7 +844,7 @@ export async function registerRoutes(
           const dropsWithNames: Record<string, { player_id: string; name: string; roster_id: string }> = {};
           if (parsedDrops && typeof parsedDrops === "object") {
             for (const [playerId, rosterId] of Object.entries(parsedDrops)) {
-              const player = cache.getPlayer(playerId);
+              const player = await cache.getPlayer(playerId);
               dropsWithNames[playerId] = {
                 player_id: playerId,
                 name: player?.full_name || playerId,
@@ -884,24 +886,23 @@ export async function registerRoutes(
     try {
       const { username } = api.sleeper.playerExposure.input.parse(req.query);
 
-      const cachedUser = cache.getUserByUsername(username);
+      const cachedUser = await cache.getUserByUsername(username);
       if (!cachedUser) {
         return res.status(404).json({ message: "User not found" });
       }
 
       const userId = cachedUser.user_id;
-      const leagues = cache.getLeaguesForUser(userId);
+      const leagues = await cache.getLeaguesForUser(userId);
       
       // Count player occurrences across leagues
       const playerCounts = new Map<string, { count: number; leagueNames: string[] }>();
       
       for (const league of leagues) {
-        const roster = cache.getRosterForUserInLeague(league.league_id, userId);
+        const roster = await cache.getRosterForUserInLeague(league.league_id, userId);
         if (!roster) continue;
 
-        // Get players from roster_players table
-        const stmt = cache.db.prepare(`SELECT player_id FROM roster_players WHERE league_id = ? AND owner_id = ?`);
-        const players = stmt.all(league.league_id, userId) as { player_id: string }[];
+        // Get players from roster_players table using new async method
+        const players = await cache.getRosterPlayersForUserInLeague(league.league_id, userId);
 
         for (const { player_id } of players) {
           if (!playerCounts.has(player_id)) {
@@ -916,26 +917,28 @@ export async function registerRoutes(
       const totalLeagues = leagues.length;
 
       // Build exposure list
-      const exposures = Array.from(playerCounts.entries()).map(([playerId, { count, leagueNames }]) => {
-        const player = cache.getPlayer(playerId);
-        return {
-          player: {
-            player_id: playerId,
-            full_name: player?.full_name || null,
-            first_name: player?.first_name || null,
-            last_name: player?.last_name || null,
-            position: player?.position || null,
-            team: player?.team || null,
-            status: player?.status || null,
-            age: player?.age || null,
-            years_exp: player?.years_exp || null,
-          },
-          leagues_owned: count,
-          total_leagues: totalLeagues,
-          exposure_pct: totalLeagues > 0 ? Math.round((count / totalLeagues) * 100) : 0,
-          league_names: leagueNames,
-        };
-      });
+      const exposures = await Promise.all(
+        Array.from(playerCounts.entries()).map(async ([playerId, { count, leagueNames }]) => {
+          const player = await cache.getPlayer(playerId);
+          return {
+            player: {
+              player_id: playerId,
+              full_name: player?.full_name || null,
+              first_name: player?.first_name || null,
+              last_name: player?.last_name || null,
+              position: player?.position || null,
+              team: player?.team || null,
+              status: player?.status || null,
+              age: player?.age || null,
+              years_exp: player?.years_exp || null,
+            },
+            leagues_owned: count,
+            total_leagues: totalLeagues,
+            exposure_pct: totalLeagues > 0 ? Math.round((count / totalLeagues) * 100) : 0,
+            league_names: leagueNames,
+          };
+        })
+      );
 
       // Sort by exposure_pct DESC
       exposures.sort((a, b) => b.exposure_pct - a.exposure_pct);
