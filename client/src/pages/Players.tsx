@@ -3,7 +3,7 @@ import { useSleeperOverview, usePlayerExposure } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertCircle, Layers, Search } from "lucide-react";
+import { Loader2, AlertCircle, Layers, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Layout } from "@/components/Layout";
 import { motion } from "framer-motion";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -23,39 +23,63 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
+
+interface ExposureResponse {
+  username: string;
+  total_leagues: number;
+  total_players: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+  exposures: Array<{
+    player: {
+      player_id: string;
+      full_name: string | null;
+      position: string | null;
+      team: string | null;
+    };
+    leagues_owned: number;
+    total_leagues: number;
+    exposure_pct: number;
+    league_names: string[];
+  }>;
+}
 
 export default function Players() {
   const { username } = useParams<{ username: string }>();
   const { data, isLoading, isError, error } = useSleeperOverview(username);
-  const { data: exposureData, isLoading: exposureLoading } = usePlayerExposure(username);
   
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [positionFilter, setPositionFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState("exposure_desc");
 
-  const filteredExposures = useMemo(() => {
-    if (!exposureData?.exposures) return [];
-    
-    return exposureData.exposures.filter((exp) => {
-      const matchesSearch = !searchTerm || 
-        (exp.player.full_name?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        exp.player.player_id.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const matchesPosition = positionFilter === "all" || 
-        exp.player.position === positionFilter;
-      
-      return matchesSearch && matchesPosition;
-    });
-  }, [exposureData?.exposures, searchTerm, positionFilter]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
-  const positions = useMemo(() => {
-    if (!exposureData?.exposures) return [];
-    const posSet = new Set<string>();
-    exposureData.exposures.forEach((exp) => {
-      if (exp.player.position) posSet.add(exp.player.position);
-    });
-    return Array.from(posSet).sort();
-  }, [exposureData?.exposures]);
+  useEffect(() => {
+    setPage(1);
+  }, [positionFilter, sortBy]);
+
+  const { data: exposureData, isLoading: exposureLoading } = usePlayerExposure({
+    username,
+    page,
+    pageSize: 100,
+    pos: positionFilter,
+    search: debouncedSearch,
+    sort: sortBy,
+  }) as { data: ExposureResponse | null; isLoading: boolean };
+
+  const positions = ["QB", "RB", "WR", "TE", "K", "DEF"];
 
   return (
     <Layout username={username}>
@@ -103,10 +127,10 @@ export default function Players() {
 
               <div className="flex items-center gap-2">
                 <Badge variant="outline">
-                  {exposureData.total_leagues} Leagues
+                  {exposureData.total_leagues} Current Leagues
                 </Badge>
                 <Badge variant="outline">
-                  {exposureData.exposures.length} Players
+                  {exposureData.total_players} Players
                 </Badge>
               </div>
             </div>
@@ -135,10 +159,24 @@ export default function Players() {
                     ))}
                   </SelectContent>
                 </Select>
+
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-44" data-testid="select-sort">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="exposure_desc">Exposure (High)</SelectItem>
+                    <SelectItem value="exposure_asc">Exposure (Low)</SelectItem>
+                    <SelectItem value="leagues_desc">Leagues (Most)</SelectItem>
+                    <SelectItem value="leagues_asc">Leagues (Least)</SelectItem>
+                    <SelectItem value="name_asc">Name (A-Z)</SelectItem>
+                    <SelectItem value="name_desc">Name (Z-A)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </Card>
 
-            {filteredExposures.length === 0 ? (
+            {exposureData.exposures.length === 0 ? (
               <Card className="p-12 text-center">
                 <div className="text-muted-foreground">
                   <Layers className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -159,7 +197,7 @@ export default function Players() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredExposures.slice(0, 100).map((exp) => {
+                    {exposureData.exposures.map((exp) => {
                       const exposurePct = exp.exposure_pct;
                       const isHighExposure = exposurePct >= 50;
                       const isMedExposure = exposurePct >= 25 && exposurePct < 50;
@@ -198,11 +236,39 @@ export default function Players() {
                   </TableBody>
                 </Table>
                 
-                {filteredExposures.length > 100 && (
-                  <div className="p-4 text-center text-muted-foreground text-sm border-t">
-                    Showing 100 of {filteredExposures.length} players
+                <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {((page - 1) * exposureData.pageSize) + 1}–{Math.min(page * exposureData.pageSize, exposureData.total_players)} of {exposureData.total_players} players
                   </div>
-                )}
+                  
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(p => p - 1)}
+                      disabled={!exposureData.hasPrev}
+                      data-testid="button-prev-page"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Prev
+                    </Button>
+                    
+                    <span className="text-sm px-2">
+                      Page {exposureData.page} of {exposureData.totalPages}
+                    </span>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(p => p + 1)}
+                      disabled={!exposureData.hasNext}
+                      data-testid="button-next-page"
+                    >
+                      Next
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
               </Card>
             )}
           </motion.div>

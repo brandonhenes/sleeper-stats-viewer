@@ -173,13 +173,37 @@ export function useTrades(groupId: string | undefined) {
   });
 }
 
-// GET /api/players/exposure?username=...
-export function usePlayerExposure(username: string | undefined) {
+// GET /api/players/exposure?username=... with pagination params
+export interface ExposureParams {
+  username: string | undefined;
+  page?: number;
+  pageSize?: number;
+  pos?: string;
+  search?: string;
+  sort?: string;
+}
+
+export function usePlayerExposure(params: ExposureParams | string | undefined) {
+  // Support both old string format and new object format
+  const normalizedParams: ExposureParams = typeof params === "string" 
+    ? { username: params } 
+    : params || { username: undefined };
+  
+  const { username, page = 1, pageSize = 100, pos, search, sort } = normalizedParams;
+
   return useQuery({
-    queryKey: [api.sleeper.playerExposure.path, username],
+    queryKey: ["/api/players/exposure", username, page, pageSize, pos, search, sort],
     queryFn: async () => {
       if (!username) return null;
-      const url = `${api.sleeper.playerExposure.path}?username=${encodeURIComponent(username)}`;
+      const searchParams = new URLSearchParams();
+      searchParams.set("username", username);
+      searchParams.set("page", String(page));
+      searchParams.set("pageSize", String(pageSize));
+      if (pos && pos !== "all") searchParams.set("pos", pos);
+      if (search) searchParams.set("search", search);
+      if (sort) searchParams.set("sort", sort);
+
+      const url = `${api.sleeper.playerExposure.path}?${searchParams.toString()}`;
       const res = await fetch(url);
       
       if (!res.ok) {
@@ -187,7 +211,7 @@ export function usePlayerExposure(username: string | undefined) {
         throw new Error("Failed to fetch player exposure");
       }
 
-      return api.sleeper.playerExposure.responses[200].parse(await res.json());
+      return res.json();
     },
     enabled: !!username && username.length > 0,
   });

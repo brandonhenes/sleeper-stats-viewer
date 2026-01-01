@@ -948,9 +948,20 @@ export async function registerRoutes(
   });
 
   // GET /api/players/exposure - Get player exposure for a user
+  // Counts only CURRENT leagues (latest season per group_id) with pagination
   app.get(api.sleeper.playerExposure.path, async (req, res) => {
     try {
-      const { username } = api.sleeper.playerExposure.input.parse(req.query);
+      const { username, page: pageStr, pageSize: pageSizeStr, pos, search, sort } = req.query;
+      
+      if (!username || typeof username !== "string") {
+        return res.status(400).json({ message: "Username required" });
+      }
+
+      const page = Math.max(1, parseInt(pageStr as string) || 1);
+      const pageSize = Math.min(200, Math.max(1, parseInt(pageSizeStr as string) || 100));
+      const posFilter = typeof pos === "string" && pos !== "all" ? pos : null;
+      const searchFilter = typeof search === "string" ? search.toLowerCase().trim() : null;
+      const sortBy = typeof sort === "string" ? sort : "exposure_desc";
 
       const cachedUser = await cache.getUserByUsername(username);
       if (!cachedUser) {
@@ -958,16 +969,28 @@ export async function registerRoutes(
       }
 
       const userId = cachedUser.user_id;
-      const leagues = await cache.getLeaguesForUser(userId);
+      const allLeagues = await cache.getLeaguesForUser(userId);
       
-      // Count player occurrences across leagues
+      // Get only CURRENT leagues: latest season per group_id
+      // Group leagues by group_id, keep only max season per group
+      const groupMap = new Map<string, typeof allLeagues[0]>();
+      for (const league of allLeagues) {
+        const groupId = league.group_id || league.league_id;
+        const existing = groupMap.get(groupId);
+        if (!existing || (league.season && existing.season && league.season > existing.season)) {
+          groupMap.set(groupId, league);
+        }
+      }
+      const currentLeagues = Array.from(groupMap.values());
+      const totalLeagues = currentLeagues.length;
+      
+      // Count player occurrences across CURRENT leagues only
       const playerCounts = new Map<string, { count: number; leagueNames: string[] }>();
       
-      for (const league of leagues) {
+      for (const league of currentLeagues) {
         const roster = await cache.getRosterForUserInLeague(league.league_id, userId);
         if (!roster) continue;
 
-        // Get players from roster_players table using new async method
         const players = await cache.getRosterPlayersForUserInLeague(league.league_id, userId);
 
         for (const { player_id } of players) {
@@ -980,10 +1003,8 @@ export async function registerRoutes(
         }
       }
 
-      const totalLeagues = leagues.length;
-
-      // Build exposure list
-      const exposures = await Promise.all(
+      // Build full exposure list with player details
+      const allExposures = await Promise.all(
         Array.from(playerCounts.entries()).map(async ([playerId, { count, leagueNames }]) => {
           const player = await cache.getPlayer(playerId);
           return {
@@ -1006,13 +1027,56 @@ export async function registerRoutes(
         })
       );
 
-      // Sort by exposure_pct DESC
-      exposures.sort((a, b) => b.exposure_pct - a.exposure_pct);
+      // Apply filters
+      let filtered = allExposures;
+      if (posFilter) {
+        filtered = filtered.filter(e => e.player.position === posFilter);
+      }
+      if (searchFilter) {
+        filtered = filtered.filter(e => {
+          const name = (e.player.full_name || e.player.player_id).toLowerCase();
+          return name.includes(searchFilter);
+        });
+      }
+
+      // Apply sorting
+      switch (sortBy) {
+        case "exposure_asc":
+          filtered.sort((a, b) => a.exposure_pct - b.exposure_pct);
+          break;
+        case "name_asc":
+          filtered.sort((a, b) => (a.player.full_name || a.player.player_id).localeCompare(b.player.full_name || b.player.player_id));
+          break;
+        case "name_desc":
+          filtered.sort((a, b) => (b.player.full_name || b.player.player_id).localeCompare(a.player.full_name || a.player.player_id));
+          break;
+        case "leagues_desc":
+          filtered.sort((a, b) => b.leagues_owned - a.leagues_owned);
+          break;
+        case "leagues_asc":
+          filtered.sort((a, b) => a.leagues_owned - b.leagues_owned);
+          break;
+        case "exposure_desc":
+        default:
+          filtered.sort((a, b) => b.exposure_pct - a.exposure_pct);
+          break;
+      }
+
+      const totalPlayers = filtered.length;
+      const totalPages = Math.ceil(totalPlayers / pageSize);
+      const startIdx = (page - 1) * pageSize;
+      const items = filtered.slice(startIdx, startIdx + pageSize);
 
       res.json({
         username,
         total_leagues: totalLeagues,
-        exposures,
+        total_players: totalPlayers,
+        page,
+        pageSize,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+        exposures: items,
       });
     } catch (e) {
       console.error("Player exposure error:", e);
