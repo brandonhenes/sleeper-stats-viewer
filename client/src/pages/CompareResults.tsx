@@ -1,21 +1,88 @@
 import { useParams, Link } from "wouter";
-import { useSleeperOverview } from "@/hooks/use-sleeper";
+import { useSleeperOverview, usePlayerExposure, useSleeperSync, useSyncStatus } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, AlertCircle, Users, ArrowLeft, Trophy } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, AlertCircle, Users, ArrowLeft, Trophy, RefreshCw } from "lucide-react";
 import { Layout } from "@/components/Layout";
 import { motion } from "framer-motion";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress";
+import { useEffect, useState, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export default function CompareResults() {
   const { userA, userB } = useParams<{ userA: string; userB: string }>();
+  const queryClient = useQueryClient();
   
   const { data: dataA, isLoading: loadingA, error: errorA } = useSleeperOverview(userA);
   const { data: dataB, isLoading: loadingB, error: errorB } = useSleeperOverview(userB);
+  const { data: exposureA, isLoading: exposureLoadingA } = usePlayerExposure(userA);
+  const { data: exposureB, isLoading: exposureLoadingB } = usePlayerExposure(userB);
 
-  const isLoading = loadingA || loadingB;
+  const syncMutationA = useSleeperSync();
+  const syncMutationB = useSleeperSync();
+  const [jobIdA, setJobIdA] = useState<string | null>(null);
+  const [jobIdB, setJobIdB] = useState<string | null>(null);
+  
+  const { data: statusA } = useSyncStatus(jobIdA || undefined, !!jobIdA);
+  const { data: statusB } = useSyncStatus(jobIdB || undefined, !!jobIdB);
+
+  const isLoading = loadingA || loadingB || exposureLoadingA || exposureLoadingB;
   const hasError = errorA || errorB;
+
+  // Track if we've already triggered sync
+  const [syncTriggeredA, setSyncTriggeredA] = useState(false);
+  const [syncTriggeredB, setSyncTriggeredB] = useState(false);
+
+  // Auto-sync if needed (only once per session)
+  useEffect(() => {
+    if (dataA?.needs_sync && dataA.sync_status !== "running" && !syncMutationA.isPending && !jobIdA && !syncTriggeredA) {
+      setSyncTriggeredA(true);
+      syncMutationA.mutate(userA!, {
+        onSuccess: (data) => setJobIdA(data.job_id),
+        onError: () => setSyncTriggeredA(false), // Allow retry on error
+      });
+    }
+  }, [dataA?.needs_sync, dataA?.sync_status, syncMutationA.isPending, jobIdA, userA, syncTriggeredA]);
+
+  useEffect(() => {
+    if (dataB?.needs_sync && dataB.sync_status !== "running" && !syncMutationB.isPending && !jobIdB && !syncTriggeredB) {
+      setSyncTriggeredB(true);
+      syncMutationB.mutate(userB!, {
+        onSuccess: (data) => setJobIdB(data.job_id),
+        onError: () => setSyncTriggeredB(false), // Allow retry on error
+      });
+    }
+  }, [dataB?.needs_sync, dataB?.sync_status, syncMutationB.isPending, jobIdB, userB, syncTriggeredB]);
+
+  // Refetch when sync completes
+  useEffect(() => {
+    if (statusA?.status === "done") {
+      queryClient.invalidateQueries({ queryKey: ["/api/overview", userA] });
+      queryClient.invalidateQueries({ queryKey: ["/api/players/exposure", userA] });
+      setJobIdA(null);
+      setSyncTriggeredA(false); // Allow future resyncs
+    }
+  }, [statusA?.status, userA, queryClient]);
+
+  useEffect(() => {
+    if (statusB?.status === "done") {
+      queryClient.invalidateQueries({ queryKey: ["/api/overview", userB] });
+      queryClient.invalidateQueries({ queryKey: ["/api/players/exposure", userB] });
+      setJobIdB(null);
+      setSyncTriggeredB(false); // Allow future resyncs
+    }
+  }, [statusB?.status, userB, queryClient]);
 
   const calculateStats = (data: typeof dataA) => {
     if (!data) return { wins: 0, losses: 0, ties: 0, leagues: 0, winPct: "0.0" };
@@ -30,6 +97,70 @@ export default function CompareResults() {
 
   const statsA = calculateStats(dataA);
   const statsB = calculateStats(dataB);
+
+  // Compute shared and unique players
+  const comparison = useMemo(() => {
+    if (!exposureA?.exposures || !exposureB?.exposures) {
+      return { shared: [], uniqueA: [], uniqueB: [] };
+    }
+
+    const playersAMap: Record<string, typeof exposureA.exposures[0]> = {};
+    const playersBMap: Record<string, typeof exposureB.exposures[0]> = {};
+    
+    for (const e of exposureA.exposures) {
+      playersAMap[e.player.player_id] = e;
+    }
+    for (const e of exposureB.exposures) {
+      playersBMap[e.player.player_id] = e;
+    }
+
+    const shared: Array<{ player_id: string; name: string; position: string | null; exposureA: number; exposureB: number }> = [];
+    const uniqueA: Array<{ player_id: string; name: string; position: string | null; exposure: number }> = [];
+    const uniqueB: Array<{ player_id: string; name: string; position: string | null; exposure: number }> = [];
+
+    for (const id of Object.keys(playersAMap)) {
+      const expA = playersAMap[id];
+      const expB = playersBMap[id];
+      const name = expA.player.full_name || id;
+      if (expB) {
+        shared.push({
+          player_id: id,
+          name,
+          position: expA.player.position || null,
+          exposureA: expA.exposure_pct,
+          exposureB: expB.exposure_pct,
+        });
+      } else {
+        uniqueA.push({
+          player_id: id,
+          name,
+          position: expA.player.position || null,
+          exposure: expA.exposure_pct,
+        });
+      }
+    }
+
+    for (const id of Object.keys(playersBMap)) {
+      if (!playersAMap[id]) {
+        const expB = playersBMap[id];
+        uniqueB.push({
+          player_id: id,
+          name: expB.player.full_name || id,
+          position: expB.player.position || null,
+          exposure: expB.exposure_pct,
+        });
+      }
+    }
+
+    // Sort by exposure
+    shared.sort((a, b) => (b.exposureA + b.exposureB) - (a.exposureA + a.exposureB));
+    uniqueA.sort((a, b) => b.exposure - a.exposure);
+    uniqueB.sort((a, b) => b.exposure - a.exposure);
+
+    return { shared, uniqueA, uniqueB };
+  }, [exposureA, exposureB]);
+
+  const isSyncing = (statusA?.status === "running") || (statusB?.status === "running");
 
   return (
     <Layout>
@@ -59,14 +190,35 @@ export default function CompareResults() {
           </motion.div>
         )}
 
-        {isLoading && !hasError && (
+        {isSyncing && (
+          <Card className="p-6 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+              <span className="font-medium">Syncing data...</span>
+            </div>
+            {statusA?.status === "running" && (
+              <div className="mb-2">
+                <div className="text-sm text-muted-foreground mb-1">@{userA}: {statusA.detail}</div>
+                <Progress value={((statusA.leagues_done || 0) / Math.max(statusA.leagues_total || 1, 1)) * 100} />
+              </div>
+            )}
+            {statusB?.status === "running" && (
+              <div>
+                <div className="text-sm text-muted-foreground mb-1">@{userB}: {statusB.detail}</div>
+                <Progress value={((statusB.leagues_done || 0) / Math.max(statusB.leagues_total || 1, 1)) * 100} />
+              </div>
+            )}
+          </Card>
+        )}
+
+        {isLoading && !hasError && !isSyncing && (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
             <p className="text-lg font-medium animate-pulse">Loading comparison data...</p>
           </div>
         )}
 
-        {dataA && dataB && (
+        {dataA && dataB && !isSyncing && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -141,15 +293,103 @@ export default function CompareResults() {
               </Card>
             </div>
 
-            <Card className="p-8 text-center">
-              <Trophy className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <p className="text-lg text-muted-foreground">
-                Detailed comparison features coming soon.
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                This will include player overlap, position exposure, and head-to-head in shared leagues.
-              </p>
+            {/* Shared Players */}
+            <Card className="mb-6">
+              <div className="p-4 border-b flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-primary" />
+                  Shared Players
+                </h3>
+                <Badge variant="outline">{comparison.shared.length} players</Badge>
+              </div>
+              {comparison.shared.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  No shared players found.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Player</TableHead>
+                      <TableHead className="text-center">Pos</TableHead>
+                      <TableHead className="text-center">@{userA}</TableHead>
+                      <TableHead className="text-center">@{userB}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {comparison.shared.slice(0, 25).map((p) => (
+                      <TableRow key={p.player_id} data-testid={`row-shared-${p.player_id}`}>
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="outline" className="text-xs">{p.position || "?"}</Badge>
+                        </TableCell>
+                        <TableCell className="text-center font-mono">{p.exposureA}%</TableCell>
+                        <TableCell className="text-center font-mono">{p.exposureB}%</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </Card>
+
+            {/* Unique Players Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <div className="p-4 border-b flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="font-semibold">Only @{userA}</h3>
+                  <Badge variant="outline">{comparison.uniqueA.length} players</Badge>
+                </div>
+                {comparison.uniqueA.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground">
+                    No unique players.
+                  </div>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto">
+                    <Table>
+                      <TableBody>
+                        {comparison.uniqueA.slice(0, 20).map((p) => (
+                          <TableRow key={p.player_id}>
+                            <TableCell className="font-medium">{p.name}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className="text-xs">{p.position || "?"}</Badge>
+                            </TableCell>
+                            <TableCell className="text-center font-mono text-muted-foreground">{p.exposure}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </Card>
+
+              <Card>
+                <div className="p-4 border-b flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="font-semibold">Only @{userB}</h3>
+                  <Badge variant="outline">{comparison.uniqueB.length} players</Badge>
+                </div>
+                {comparison.uniqueB.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground">
+                    No unique players.
+                  </div>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto">
+                    <Table>
+                      <TableBody>
+                        {comparison.uniqueB.slice(0, 20).map((p) => (
+                          <TableRow key={p.player_id}>
+                            <TableCell className="font-medium">{p.name}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className="text-xs">{p.position || "?"}</Badge>
+                            </TableCell>
+                            <TableCell className="text-center font-mono text-muted-foreground">{p.exposure}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </Card>
+            </div>
           </motion.div>
         )}
       </div>

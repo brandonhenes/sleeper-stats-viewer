@@ -291,6 +291,11 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
               fpts: r.settings?.fpts || 0,
               fpts_against: r.settings?.fpts_against || 0,
             });
+            
+            // Store the player IDs for this roster (for exposure tracking)
+            // Always call this to clear stale players if roster is now empty
+            const rosterPlayers = (r.players && Array.isArray(r.players)) ? r.players : [];
+            await cache.updateRosterPlayers(league.league_id, r.owner_id, rosterPlayers);
           }
         }
 
@@ -324,15 +329,16 @@ async function runSyncJob(jobId: string, username: string): Promise<void> {
 
     await updateJob({ step: "trades", detail: "Fetching trade history..." });
 
-    // Fetch trades for each league (all weeks 1-18)
+    // Fetch trades for each league (rounds 0-22 to cover offseason + regular season + playoffs)
     await withConcurrencyLimit(allLeagues, 6, async (league) => {
       try {
-        // Fetch transactions for weeks 1-18 (regular season + playoffs)
-        for (let week = 1; week <= 18; week++) {
-          const transactions = await getLeagueTransactions(league.league_id, week);
+        // Fetch transactions for rounds 0-22 (0 = offseason, 1-18 = regular season, 19+ = playoffs)
+        // DO NOT early-stop on empty rounds - some leagues have gaps
+        for (let round = 0; round <= 22; round++) {
+          const transactions = await getLeagueTransactions(league.league_id, round);
           if (!transactions || !Array.isArray(transactions)) continue;
 
-          // Filter for trades only (type = "trade")
+          // Filter for trades only (type === "trade")
           const trades = transactions.filter((t: any) => t.type === "trade");
           for (const trade of trades) {
             await cache.upsertTrade({
@@ -409,6 +415,69 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // GET /api/debug/db - Debug endpoint to check DB counts for a user
+  app.get("/api/debug/db", async (req, res) => {
+    try {
+      const username = req.query.username as string;
+      if (!username) {
+        return res.status(400).json({ error: "username required" });
+      }
+
+      const user = await cache.getUserByUsername(username);
+      if (!user) {
+        return res.json({
+          user_exists: false,
+          leagues_count: 0,
+          rosters_count: 0,
+          rosters_with_players_count: 0,
+          roster_players_count: 0,
+          trades_count: 0,
+          players_master_count: 0,
+        });
+      }
+
+      // Get counts
+      const leagues = await cache.getLeaguesForUser(user.user_id);
+      const rosters = await cache.getRostersForUser(user.user_id);
+      
+      // Count rosters with players
+      let rostersWithPlayersCount = 0;
+      let totalRosterPlayersCount = 0;
+      for (const roster of rosters) {
+        const players = await cache.getRosterPlayersForUserInLeague(roster.league_id, roster.owner_id);
+        if (players.length > 0) {
+          rostersWithPlayersCount++;
+          totalRosterPlayersCount += players.length;
+        }
+      }
+
+      // Count trades for user's leagues
+      let tradesCount = 0;
+      for (const league of leagues) {
+        const trades = await cache.getTradesForLeague(league.league_id);
+        tradesCount += trades.length;
+      }
+
+      // Count players_master
+      const allPlayers = await cache.getAllPlayers();
+
+      return res.json({
+        user_exists: true,
+        user_id: user.user_id,
+        username: user.username,
+        leagues_count: leagues.length,
+        rosters_count: rosters.length,
+        rosters_with_players_count: rostersWithPlayersCount,
+        roster_players_count: totalRosterPlayersCount,
+        trades_count: tradesCount,
+        players_master_count: allPlayers.length,
+      });
+    } catch (e) {
+      console.error("Debug endpoint error:", e);
+      res.status(500).json({ error: e instanceof Error ? e.message : "Unknown error" });
+    }
+  });
 
   // GET /api/overview - Returns league groups with aggregated W-L records
   // Always returns cached data immediately with sync status flags
