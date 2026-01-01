@@ -1144,13 +1144,21 @@ export async function registerRoutes(
           leagueHasTrades = true;
           tradeStats.total_trades++;
 
-          // Parse adds to count players acquired/traded
+          // Parse adds to count players acquired
           try {
             const adds = JSON.parse(trade.adds || "{}") as Record<string, number>;
             for (const [playerId, addRosterId] of Object.entries(adds)) {
               if (addRosterId === userRosterId) {
                 tradeStats.total_players_acquired++;
-              } else if (rosterIds.includes(userRosterId)) {
+              }
+            }
+          } catch { }
+
+          // Parse drops to count players traded away
+          try {
+            const drops = JSON.parse(trade.drops || "{}") as Record<string, number>;
+            for (const [playerId, dropRosterId] of Object.entries(drops)) {
+              if (dropRosterId === userRosterId) {
                 tradeStats.total_players_traded++;
               }
             }
