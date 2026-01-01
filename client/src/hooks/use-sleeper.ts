@@ -216,3 +216,22 @@ export function usePlayerExposure(params: ExposureParams | string | undefined) {
     enabled: !!username && username.length > 0,
   });
 }
+
+// GET /api/scouting/:username - Get scouting stats
+export function useScoutingStats(username: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/scouting", username],
+    queryFn: async () => {
+      if (!username) return null;
+      const res = await fetch(`/api/scouting/${encodeURIComponent(username)}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("User not found");
+        throw new Error("Failed to fetch scouting stats");
+      }
+
+      return res.json();
+    },
+    enabled: !!username && username.length > 0,
+  });
+}

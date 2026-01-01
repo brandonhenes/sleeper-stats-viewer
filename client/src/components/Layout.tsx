@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Users, Layers } from "lucide-react";
+import { User, Users, Layers, Target } from "lucide-react";
 
 interface LayoutProps {
   username?: string;
@@ -12,6 +12,7 @@ export function Layout({ username, children }: LayoutProps) {
   
   const getActiveTab = () => {
     if (location.includes("/players/")) return "players";
+    if (location.includes("/scouting/")) return "scouting";
     if (location.includes("/compare")) return "compare";
     return "profile";
   };
@@ -45,6 +46,14 @@ export function Layout({ username, children }: LayoutProps) {
                       <TabsTrigger value="players" className="gap-2" data-testid="tab-players">
                         <Layers className="w-4 h-4" />
                         Players
+                      </TabsTrigger>
+                    </Link>
+                  )}
+                  {username && (
+                    <Link href={`/scouting/${username}`}>
+                      <TabsTrigger value="scouting" className="gap-2" data-testid="tab-scouting">
+                        <Target className="w-4 h-4" />
+                        Scouting
                       </TabsTrigger>
                     </Link>
                   )}

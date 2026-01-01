@@ -1087,5 +1087,122 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/scouting/:username - Get scouting stats for a user
+  app.get("/api/scouting/:username", async (req, res) => {
+    try {
+      const { username } = req.params;
+      
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const userId = cachedUser.user_id;
+      const allLeagues = await cache.getLeaguesForUser(userId);
+      
+      // Get current leagues only (latest per group)
+      const groupMap = new Map<string, typeof allLeagues[0]>();
+      for (const league of allLeagues) {
+        const groupId = league.group_id || league.league_id;
+        const existing = groupMap.get(groupId);
+        if (!existing || (league.season && existing.season && league.season > existing.season)) {
+          groupMap.set(groupId, league);
+        }
+      }
+      const currentLeagues = Array.from(groupMap.values());
+
+      // Get all trades for current leagues
+      const tradeStats = {
+        total_trades: 0,
+        total_picks_acquired: 0,
+        total_picks_traded: 0,
+        total_players_acquired: 0,
+        total_players_traded: 0,
+        leagues_with_trades: 0,
+        avg_trades_per_league: 0,
+        first_round_picks_acquired: 0,
+        first_round_picks_traded: 0,
+      };
+
+      for (const league of currentLeagues) {
+        const trades = await cache.getTradesForLeague(league.league_id);
+        const roster = await cache.getRosterForUserInLeague(league.league_id, userId);
+        if (!roster || !roster.roster_id) continue;
+
+        const userRosterId = roster.roster_id;
+        let leagueHasTrades = false;
+
+        for (const trade of trades) {
+          // Parse roster_ids to see if user was involved
+          let rosterIds: number[] = [];
+          try {
+            rosterIds = JSON.parse(trade.roster_ids || "[]");
+          } catch { }
+
+          if (!rosterIds.includes(userRosterId)) continue;
+
+          leagueHasTrades = true;
+          tradeStats.total_trades++;
+
+          // Parse adds to count players acquired/traded
+          try {
+            const adds = JSON.parse(trade.adds || "{}") as Record<string, number>;
+            for (const [playerId, addRosterId] of Object.entries(adds)) {
+              if (addRosterId === userRosterId) {
+                tradeStats.total_players_acquired++;
+              } else if (rosterIds.includes(userRosterId)) {
+                tradeStats.total_players_traded++;
+              }
+            }
+          } catch { }
+
+          // Parse draft_picks to count picks moved
+          try {
+            const picks = JSON.parse(trade.draft_picks || "[]") as Array<{
+              round: number;
+              season: string;
+              owner_id: number;
+              previous_owner_id: number;
+            }>;
+            for (const pick of picks) {
+              if (pick.owner_id === userRosterId) {
+                tradeStats.total_picks_acquired++;
+                if (pick.round === 1) tradeStats.first_round_picks_acquired++;
+              }
+              if (pick.previous_owner_id === userRosterId) {
+                tradeStats.total_picks_traded++;
+                if (pick.round === 1) tradeStats.first_round_picks_traded++;
+              }
+            }
+          } catch { }
+        }
+
+        if (leagueHasTrades) {
+          tradeStats.leagues_with_trades++;
+        }
+      }
+
+      tradeStats.avg_trades_per_league = currentLeagues.length > 0 
+        ? Math.round((tradeStats.total_trades / currentLeagues.length) * 10) / 10 
+        : 0;
+
+      // Calculate draft capital score (picks acquired minus traded, weighted by round)
+      const draftCapitalScore = (tradeStats.first_round_picks_acquired * 3 + tradeStats.total_picks_acquired) - 
+        (tradeStats.first_round_picks_traded * 3 + tradeStats.total_picks_traded);
+
+      res.json({
+        username,
+        total_current_leagues: currentLeagues.length,
+        trade_stats: tradeStats,
+        draft_capital_score: draftCapitalScore,
+        trade_propensity: tradeStats.avg_trades_per_league >= 5 ? "high" : 
+          tradeStats.avg_trades_per_league >= 2 ? "medium" : "low",
+      });
+    } catch (e) {
+      console.error("Scouting stats error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
   return httpServer;
 }

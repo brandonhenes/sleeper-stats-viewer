@@ -11,6 +11,7 @@ import LeagueGroupDetails from "@/pages/LeagueGroupDetails";
 import Players from "@/pages/Players";
 import Compare from "@/pages/Compare";
 import CompareResults from "@/pages/CompareResults";
+import Scouting from "@/pages/Scouting";
 
 function Router() {
   return (
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/u/:username" component={Profile} />
       <Route path="/u/:username/league/:groupId" component={LeagueGroupDetails} />
       <Route path="/players/:username" component={Players} />
+      <Route path="/scouting/:username" component={Scouting} />
       <Route path="/compare" component={Compare} />
       <Route path="/compare/:userA/:userB" component={CompareResults} />
       <Route path="/league/:id" component={LeagueDetails} />
