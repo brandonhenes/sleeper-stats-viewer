@@ -63,6 +63,10 @@ Preferred communication style: Simple, everyday language.
 - `GET /api/group/:groupId/h2h?username=<username>` - Returns head-to-head records for a league group
 - `GET /api/group/:groupId/trades` - Returns all trades for a league group
 - `GET /api/players/exposure?username=<username>` - Returns player exposure analysis
+- `GET /api/league/:leagueId/draft-capital?username=<username>` - Returns draft picks owned from trades
+- `GET /api/league/:leagueId/churn?username=<username>` - Returns roster churn rate and league ranking
+- `GET /api/league/:leagueId/trade-timing?username=<username>` - Returns trade timing analysis by season phase
+- `GET /api/league/:leagueId/all-play?username=<username>` - Returns all-play record and luck index
 
 ### Frontend Routes
 - `/` - Home page with username search
@@ -104,6 +108,14 @@ Preferred communication style: Simple, everyday language.
 - `SESSION_SECRET`: Session secret for authentication (if needed)
 
 ## Recent Changes
+
+### January 2, 2026
+- **Draft Capital Tracking**: Shows traded picks owned by year/round, derived from Sleeper's traded_picks API data only
+- **Roster Churn Rate**: Calculates waiver add/drop activity with league ranking (excludes current user from avg calculation)
+- **Trade Timing Analysis**: Classifies trades by season phase (draft window, in-season, playoffs, offseason) with trading style
+- **All-Play/Luck Index**: Computes theoretical record vs all opponents each week, compares to actual record for luck factor
+- Added useDraftCapital, useChurnRate, useTradeTiming, useAllPlay hooks
+- League detail page now shows Draft Capital, Churn Rate, Trade Timing, and Luck Index cards
 
 ### December 31, 2025
 - **Migrated from SQLite to PostgreSQL**: Complete rewrite of cache layer to use PostgreSQL with Drizzle ORM for Autoscale deployment compatibility
