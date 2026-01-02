@@ -273,3 +273,42 @@ export function useChurnStats(leagueId: string | undefined, username: string | u
     enabled: !!leagueId && !!username,
   });
 }
+
+// GET /api/league/:leagueId/trade-timing?username=... - Get trade timing analysis
+export function useTradeTiming(leagueId: string | undefined, username: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "trade-timing", username],
+    queryFn: async () => {
+      if (!leagueId || !username) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/trade-timing?username=${encodeURIComponent(username)}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch trade timing");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId && !!username,
+  });
+}
+
+// GET /api/league/:leagueId/all-play?username=... - Get all-play record and luck index
+export function useAllPlay(leagueId: string | undefined, username: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "all-play", username],
+    queryFn: async () => {
+      if (!leagueId || !username) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/all-play?username=${encodeURIComponent(username)}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch all-play stats");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId && !!username,
+    staleTime: 1000 * 60 * 10, // Cache for 10 min (expensive API calls)
+  });
+}

@@ -1477,5 +1477,223 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/league/:leagueId/trade-timing?username=<username>
+  // Returns trade timing analysis - when trades happen (draft vs in-season)
+  app.get("/api/league/:leagueId/trade-timing", async (req, res) => {
+    const { leagueId } = req.params;
+    const username = req.query.username as string;
+
+    if (!username) {
+      return res.status(400).json({ message: "Missing username" });
+    }
+
+    try {
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const rosters = await cache.getRostersForLeague(leagueId);
+      const userRoster = rosters.find(r => r.owner_id === cachedUser.user_id);
+      
+      if (!userRoster) {
+        return res.status(404).json({ message: "User not in this league" });
+      }
+
+      const userRosterId = userRoster.roster_id;
+      const leagueTxns = await cache.getTradesForLeague(leagueId);
+      
+      // Analyze trade timing
+      // NFL season phases:
+      // - Draft window: August-September (before regular season)
+      // - Regular season: Weeks 1-14 (September-December)
+      // - Playoffs: Weeks 15-17 (December-January)
+      // - Offseason: February-July
+      
+      let draftWindowTrades = 0;
+      let inSeasonTrades = 0;
+      let playoffTrades = 0;
+      let offseasonTrades = 0;
+      let totalTrades = 0;
+
+      for (const txn of leagueTxns) {
+        // Check if user is involved in this trade
+        let rosterIds: number[] = [];
+        try { rosterIds = txn.roster_ids ? JSON.parse(txn.roster_ids) : []; } catch { }
+        if (!rosterIds.includes(userRosterId)) continue;
+
+        totalTrades++;
+
+        // Use transaction timestamp (Sleeper stores in ms)
+        const txnDate = txn.created_at ? new Date(txn.created_at) : null;
+        
+        if (txnDate) {
+          const month = txnDate.getMonth(); // 0-11
+          
+          if (month >= 7 && month <= 8) { // August-September (pre-season/draft window)
+            draftWindowTrades++;
+          } else if (month >= 1 && month <= 6) { // February-July (offseason)
+            offseasonTrades++;
+          } else if (month >= 11 || month === 0) { // December-January (playoffs)
+            playoffTrades++;
+          } else { // September-November (regular season)
+            inSeasonTrades++;
+          }
+        } else {
+          offseasonTrades++; // Default to offseason if no timing info
+        }
+      }
+
+      // Determine trading style
+      let tradingStyle = "balanced";
+      if (totalTrades > 0) {
+        const draftRatio = draftWindowTrades / totalTrades;
+        const inSeasonRatio = inSeasonTrades / totalTrades;
+        const offseasonRatio = offseasonTrades / totalTrades;
+        
+        if (draftRatio > 0.5) tradingStyle = "draft_heavy";
+        else if (inSeasonRatio > 0.5) tradingStyle = "reactionary";
+        else if (offseasonRatio > 0.5) tradingStyle = "offseason_builder";
+      }
+
+      res.json({
+        league_id: leagueId,
+        username,
+        roster_id: userRosterId,
+        total_trades: totalTrades,
+        draft_window: draftWindowTrades,
+        in_season: inSeasonTrades,
+        playoffs: playoffTrades,
+        offseason: offseasonTrades,
+        trading_style: tradingStyle,
+      });
+    } catch (e) {
+      console.error("Trade timing error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/all-play?username=<username>
+  // Returns all-play record and luck index (what record would be if played everyone each week)
+  app.get("/api/league/:leagueId/all-play", async (req, res) => {
+    const { leagueId } = req.params;
+    const username = req.query.username as string;
+
+    if (!username) {
+      return res.status(400).json({ message: "Missing username" });
+    }
+
+    try {
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const rosters = await cache.getRostersForLeague(leagueId);
+      const userRoster = rosters.find(r => r.owner_id === cachedUser.user_id);
+      
+      if (!userRoster) {
+        return res.status(404).json({ message: "User not in this league" });
+      }
+
+      const userRosterId = userRoster.roster_id;
+      const leagueSize = rosters.length;
+
+      // Fetch matchups for each week (1-14 for regular season)
+      let allPlayWins = 0;
+      let allPlayLosses = 0;
+      let allPlayTies = 0;
+      let actualWins = 0;
+      let actualLosses = 0;
+      let actualTies = 0;
+      let weeksPlayed = 0;
+
+      for (let week = 1; week <= 18; week++) {
+        const matchups = await getMatchups(leagueId, week) as Array<{
+          roster_id: number;
+          points: number;
+          matchup_id: number;
+        }> | null;
+
+        if (!matchups || matchups.length === 0) continue;
+
+        // Find user's score this week
+        const userMatchup = matchups.find(m => m.roster_id === userRosterId);
+        if (!userMatchup || userMatchup.points === undefined) continue;
+
+        weeksPlayed++;
+        const userScore = userMatchup.points;
+        const userMatchupId = userMatchup.matchup_id;
+
+        // Find actual opponent
+        const actualOpponent = matchups.find(
+          m => m.matchup_id === userMatchupId && m.roster_id !== userRosterId
+        );
+        
+        // Track actual result (1 game per week)
+        if (actualOpponent && actualOpponent.points !== undefined) {
+          if (userScore > actualOpponent.points) actualWins++;
+          else if (userScore < actualOpponent.points) actualLosses++;
+          else actualTies++;
+        }
+
+        // Calculate all-play record (vs everyone except self)
+        // This is the theoretical record if you played everyone each week
+        for (const opp of matchups) {
+          if (opp.roster_id === userRosterId) continue;
+          if (opp.points === undefined) continue;
+
+          if (userScore > opp.points) allPlayWins++;
+          else if (userScore < opp.points) allPlayLosses++;
+          else allPlayTies++;
+        }
+      }
+
+      // Calculate luck index: difference between actual win rate and expected (all-play) win rate
+      const totalAllPlayGames = allPlayWins + allPlayLosses + allPlayTies;
+      const totalActualGames = actualWins + actualLosses + actualTies;
+      
+      const allPlayWinRate = totalAllPlayGames > 0 
+        ? (allPlayWins + allPlayTies * 0.5) / totalAllPlayGames 
+        : 0;
+      const actualWinRate = totalActualGames > 0 
+        ? (actualWins + actualTies * 0.5) / totalActualGames 
+        : 0;
+      
+      // Positive luck = actual record better than expected
+      const luckIndex = Math.round((actualWinRate - allPlayWinRate) * 100);
+      
+      let luckLabel = "neutral";
+      if (luckIndex > 10) luckLabel = "lucky";
+      else if (luckIndex > 5) luckLabel = "slightly_lucky";
+      else if (luckIndex < -10) luckLabel = "unlucky";
+      else if (luckIndex < -5) luckLabel = "slightly_unlucky";
+
+      res.json({
+        league_id: leagueId,
+        username,
+        roster_id: userRosterId,
+        weeks_played: weeksPlayed,
+        all_play: {
+          wins: allPlayWins,
+          losses: allPlayLosses,
+          ties: allPlayTies,
+          win_rate: Math.round(allPlayWinRate * 100),
+        },
+        actual: {
+          wins: actualWins,
+          losses: actualLosses,
+          ties: actualTies,
+          win_rate: Math.round(actualWinRate * 100),
+        },
+        luck_index: luckIndex,
+        luck_label: luckLabel,
+      });
+    } catch (e) {
+      console.error("All-play error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
   return httpServer;
 }

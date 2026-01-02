@@ -1,9 +1,9 @@
 import { useParams, Link } from "wouter";
-import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats } from "@/hooks/use-sleeper";
+import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, useTradeTiming, useAllPlay } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, ArrowRightLeft, Layers, RefreshCw } from "lucide-react";
+import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, ArrowRightLeft, Layers, RefreshCw, Calendar, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 import { Layout } from "@/components/Layout";
 import {
@@ -33,6 +33,8 @@ export default function LeagueGroupDetails() {
   
   const { data: draftCapitalData, isLoading: draftCapitalLoading } = useDraftCapital(latestLeagueId, username);
   const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username);
+  const { data: tradeTimingData, isLoading: tradeTimingLoading } = useTradeTiming(latestLeagueId, username);
+  const { data: allPlayData, isLoading: allPlayLoading } = useAllPlay(latestLeagueId, username);
 
   const backLink = username ? `/u/${username}` : "/";
 
@@ -273,7 +275,7 @@ export default function LeagueGroupDetails() {
             )}
           </motion.div>
 
-          {/* Draft Capital & Churn Section */}
+          {/* Draft Capital, Churn & Trade Timing Section */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -417,6 +419,122 @@ export default function LeagueGroupDetails() {
 
                 {!churnLoading && !churnData && (
                   <p className="text-sm text-muted-foreground text-center py-4">No activity data available</p>
+                )}
+              </Card>
+
+              {/* Trade Timing Card */}
+              <Card className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Calendar className="w-5 h-5 text-primary" />
+                  <h3 className="text-lg font-bold">Trade Timing</h3>
+                </div>
+
+                {tradeTimingLoading && (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!tradeTimingLoading && tradeTimingData && tradeTimingData.total_trades > 0 && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">{tradeTimingData.draft_window}</div>
+                        <div className="text-xs text-muted-foreground">Draft Window</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">{tradeTimingData.in_season}</div>
+                        <div className="text-xs text-muted-foreground">In-Season</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">{tradeTimingData.playoffs}</div>
+                        <div className="text-xs text-muted-foreground">Playoffs</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">{tradeTimingData.offseason}</div>
+                        <div className="text-xs text-muted-foreground">Offseason</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Total Trades</span>
+                        <span className="font-mono font-bold">{tradeTimingData.total_trades}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Trading Style</span>
+                        <Badge variant="outline" className="capitalize">
+                          {tradeTimingData.trading_style.replace("_", " ")}
+                        </Badge>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {!tradeTimingLoading && (!tradeTimingData || tradeTimingData.total_trades === 0) && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No trade data available</p>
+                )}
+              </Card>
+
+              {/* All-Play / Luck Index Card */}
+              <Card className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  <h3 className="text-lg font-bold">Luck Index</h3>
+                </div>
+
+                {allPlayLoading && (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!allPlayLoading && allPlayData && allPlayData.weeks_played > 0 && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">
+                          {allPlayData.actual.wins}-{allPlayData.actual.losses}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Actual Record</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">
+                          {allPlayData.all_play.wins}-{allPlayData.all_play.losses}
+                        </div>
+                        <div className="text-xs text-muted-foreground">All-Play Record</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">All-Play Win %</span>
+                        <span className="font-mono">{allPlayData.all_play.win_rate}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Luck Index</span>
+                        <span className={`font-mono font-bold ${
+                          allPlayData.luck_index > 5 ? "text-green-500" : 
+                          allPlayData.luck_index < -5 ? "text-red-500" : ""
+                        }`}>
+                          {allPlayData.luck_index > 0 ? "+" : ""}{allPlayData.luck_index}%
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Status</span>
+                        <Badge variant={
+                          allPlayData.luck_label.includes("lucky") ? "default" :
+                          allPlayData.luck_label.includes("unlucky") ? "secondary" : "outline"
+                        } className="capitalize">
+                          {allPlayData.luck_label.replace("_", " ")}
+                        </Badge>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {!allPlayLoading && (!allPlayData || allPlayData.weeks_played === 0) && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No matchup data available</p>
                 )}
               </Card>
             </div>
