@@ -27,6 +27,8 @@ import { useState, useEffect } from "react";
 
 interface ExposureResponse {
   username: string;
+  active_leagues: number;
+  history_leagues: number;
   total_leagues: number;
   total_players: number;
   page: number;
@@ -126,10 +128,15 @@ export default function Players() {
               </div>
 
               <div className="flex items-center gap-2">
-                <Badge variant="outline">
-                  {exposureData.total_leagues} Current Leagues
+                <Badge variant="outline" data-testid="badge-active-leagues">
+                  {exposureData.active_leagues || exposureData.total_leagues} Active Leagues
                 </Badge>
-                <Badge variant="outline">
+                {exposureData.history_leagues > 0 && (
+                  <Badge variant="secondary" className="text-muted-foreground" data-testid="badge-history-leagues">
+                    +{exposureData.history_leagues} History
+                  </Badge>
+                )}
+                <Badge variant="outline" data-testid="badge-total-players">
                   {exposureData.total_players} Players
                 </Badge>
               </div>

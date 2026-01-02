@@ -551,6 +551,11 @@ export const cache = {
     return result[0]?.last_updated || null;
   },
 
+  async getPlayerCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(schema.players_master);
+    return Number(result[0]?.count) || 0;
+  },
+
   async bulkUpsertPlayers(players: Array<{
     player_id: string;
     full_name?: string | null;

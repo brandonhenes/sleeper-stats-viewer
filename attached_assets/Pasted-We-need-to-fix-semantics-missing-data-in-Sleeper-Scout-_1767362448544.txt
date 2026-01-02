@@ -1,0 +1,92 @@
+We need to fix semantics + missing data in Sleeper Scout AND add a lightweight debug drawer.
+
+A) ACTIVE vs HISTORY leagues
+- Right now “Current Leagues” count is 39 but should be ~32 active.
+- Implement two sets per username:
+  1) activeGroups: latest league per group_id where the user is still an owner AND the league is active.
+     Practical definition (robust):
+       - user has a roster in that league_id (rosters contains their owner_id)
+       - AND (league.status != "complete") OR (league.season == current NFL season)
+     If status is unreliable, prioritize season == current season and roster ownership.
+  2) historyGroups: all other group_ids.
+- Default all exposure/scouting/compare to activeGroups only.
+- Add UI toggle/tab: Active | History (History is read-only and NOT used in exposure denominator).
+
+B) Player Exposure should use activeGroups only
+- Denominator = activeGroupCount (NOT season instances, NOT all groups).
+- Header should show:
+   “32 Active Leagues” and optionally a small “+7 History” indicator.
+- ExposurePct = leaguesOwned / activeGroupCount
+- Keep pagination + sorting from prior work.
+
+C) Trade history is still blank — fix pipeline and filtering
+- For league detail (group_id), trade history must include ALL seasons in that league history:
+  - For each league_id in the group, fetch transactions rounds 0..22 (NO early stop).
+  - Store type === "trade" rows to DB.
+- Fix my-trades filter:
+  - Determine my roster_id per league_id from rosters table.
+  - Filter trade transactions where transaction.roster_ids includes my roster_id (preferred).
+  - If roster_ids is missing, fall back to detecting involvement via adds/drops/draft_picks structure.
+- UI: If 0 trades, show a clear empty state with diagnostics:
+  “0 trades found (checked rounds 0–22 across X seasons).”
+
+D) Roster Activity time frame (make it explicit)
+- Add selector on league detail: This season | Last 30 days | Lifetime
+- Default = This season
+- Compute adds/drops/moves for selected window:
+  - This season = rounds 0..22 of latest league_id for that group
+  - Last 30 days = filter by created_at timestamp if present (otherwise fallback to last 4 rounds with a label)
+  - Lifetime = across all league_ids in group
+- Display: “Timeframe: ____” and counts (adds, drops, waivers if available, total moves, moves/week).
+- Ensure we are not accidentally showing only 1 round/week.
+
+E) Luck Index sanity + labeling
+- Ensure luck/strength computations do not mix seasons.
+- On league detail, show:
+  - Weeks analyzed: X
+  - Teams: N
+  - H2H record + games (wins+losses+ties)
+  - All-Play record + games (X*(N-1))
+- Compute:
+  allPlayWinPct = allPlayWins / (allPlayWins + allPlayLosses)
+  expectedWins = allPlayWinPct * H2H_games
+  luckIndex = H2H_wins - expectedWins
+- If league uses median/extra games, show note that official record may differ, but H2H is computed only from paired matchups.
+
+F) ADD DEBUG DRAWER (must-have for fast diagnosis)
+- Implement a hidden debug drawer visible ONLY when URL has ?debug=1
+- Place it as a collapsible panel at the bottom right (or a small bug icon).
+- Debug drawer should show, for the currently viewed username (and group if on league detail):
+  Profile-level:
+   - username, sleeper_user_id
+   - activeGroupCount, historyGroupCount
+   - active latestLeagueIds count
+   - players_master row count
+   - exposure query: totalPlayers, page/pageSize, hasNext
+  League-detail-level (when on /league/:groupId):
+   - group_id
+   - league_ids in group + seasons range
+   - which league_id is used for “current snapshot”
+   - my owner_id + roster_id for latest league
+   - transactions fetched: rounds range (0..22), total rows stored, trade rows found
+   - matchups analyzed: weeks count, teams N
+   - H2H games computed, all-play games computed
+   - luckIndex inputs (H2H_wins, expectedWins, allPlayWinPct)
+
+- Also add a server-only debug endpoint:
+  GET /api/debug/db?username=...
+  Return counts:
+   sleeper_users row exists,
+   leagues count,
+   activeGroups count,
+   rosters count and how many have players_json length>0,
+   trades count,
+   players_master count.
+
+Acceptance checks after implementing:
+1) Active leagues count matches ~32 for @henes35.
+2) Exposure denominator uses activeGroupCount only.
+3) Trade history shows data for leagues that have trades.
+4) Activity shows the chosen timeframe and numbers change appropriately.
+5) Luck index does not exceed season games and shows weeks analyzed.
+6) Debug drawer shows the above diagnostics when ?debug=1 is present (and is hidden otherwise).

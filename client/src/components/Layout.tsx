@@ -1,13 +1,16 @@
 import { Link, useLocation } from "wouter";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { User, Users, Layers, Target } from "lucide-react";
+import { DebugDrawer } from "./DebugDrawer";
 
 interface LayoutProps {
   username?: string;
+  groupId?: string;
+  leagueId?: string;
   children: React.ReactNode;
 }
 
-export function Layout({ username, children }: LayoutProps) {
+export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
   const [location] = useLocation();
   
   const getActiveTab = () => {
@@ -70,6 +73,7 @@ export function Layout({ username, children }: LayoutProps) {
         </nav>
       )}
       {children}
+      <DebugDrawer username={username} groupId={groupId} leagueId={leagueId} />
     </div>
   );
 }

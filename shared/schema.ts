@@ -172,6 +172,8 @@ export const leagueGroupSchema = z.object({
   overall_record: myRecordSchema, // aggregated W-L-T across all seasons
   league_ids: z.array(z.string()), // all league_ids in this group
   league_type: z.enum(["dynasty", "redraft", "unknown"]).optional(), // derived from settings
+  is_active: z.boolean().optional(), // true if user has roster in latest season and league is active
+  latest_league_id: z.string().optional(), // the latest league_id for this group
 });
 
 // Original league schema (kept for backwards compatibility)

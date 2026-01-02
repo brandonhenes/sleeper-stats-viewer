@@ -120,11 +120,21 @@ async function computeLeagueGroups(userId: string): Promise<void> {
   }
 }
 
+// Get current NFL season year (use calendar year, adjusting for NFL season timing)
+function getCurrentNFLSeason(): number {
+  const now = new Date();
+  // NFL season runs Aug-Feb, so if we're in Jan-Feb, use previous year
+  const month = now.getMonth(); // 0-indexed
+  const year = now.getFullYear();
+  return month <= 1 ? year - 1 : year;
+}
+
 // Build league groups from cached data
 async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
   const leagues = await cache.getLeaguesForUser(userId);
   const rosters = await cache.getRostersForUser(userId);
   const rosterMap = new Map(rosters.map((r) => [r.league_id, r]));
+  const currentSeason = getCurrentNFLSeason();
 
   // Group leagues by group_id
   const groupsMap = new Map<string, typeof leagues>();
@@ -185,6 +195,16 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       }
     }
 
+    // Determine if this group is "active":
+    // User has a roster in the latest league AND 
+    // (league status is not "complete" OR season == current NFL season)
+    const latestLeague = groupLeagues[0];
+    const latestRoster = rosterMap.get(latestLeague.league_id);
+    const hasRosterInLatest = !!latestRoster;
+    const isCurrentSeason = latestLeague.season === currentSeason;
+    const isNotComplete = latestLeague.status !== "complete";
+    const isActive = hasRosterInLatest && (isNotComplete || isCurrentSeason);
+
     result.push({
       group_id: groupId,
       name: groupLeagues[0].name, // most recent season name
@@ -194,6 +214,8 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       overall_record: { wins: totalWins, losses: totalLosses, ties: totalTies },
       league_ids: leagueIds,
       league_type: leagueType,
+      is_active: isActive,
+      latest_league_id: latestLeague.league_id,
     });
   }
 
@@ -432,12 +454,15 @@ export async function registerRoutes(
       if (!user) {
         return res.json({
           user_exists: false,
+          username,
           leagues_count: 0,
           rosters_count: 0,
-          rosters_with_players_count: 0,
-          roster_players_count: 0,
+          total_groups: 0,
+          active_groups: 0,
+          history_groups: 0,
           trades_count: 0,
           players_master_count: 0,
+          current_nfl_season: getCurrentNFLSeason(),
         });
       }
 
@@ -445,16 +470,10 @@ export async function registerRoutes(
       const leagues = await cache.getLeaguesForUser(user.user_id);
       const rosters = await cache.getRostersForUser(user.user_id);
       
-      // Count rosters with players
-      let rostersWithPlayersCount = 0;
-      let totalRosterPlayersCount = 0;
-      for (const roster of rosters) {
-        const players = await cache.getRosterPlayersForUserInLeague(roster.league_id, roster.owner_id);
-        if (players.length > 0) {
-          rostersWithPlayersCount++;
-          totalRosterPlayersCount += players.length;
-        }
-      }
+      // Build league groups and count active vs history
+      const leagueGroups = await buildLeagueGroups(user.user_id);
+      const activeGroups = leagueGroups.filter(g => g.is_active);
+      const historyGroups = leagueGroups.filter(g => !g.is_active);
 
       // Count trades for user's leagues
       let tradesCount = 0;
@@ -464,7 +483,7 @@ export async function registerRoutes(
       }
 
       // Count players_master
-      const allPlayers = await cache.getAllPlayers();
+      const playerCount = await cache.getPlayerCount();
 
       return res.json({
         user_exists: true,
@@ -472,10 +491,12 @@ export async function registerRoutes(
         username: user.username,
         leagues_count: leagues.length,
         rosters_count: rosters.length,
-        rosters_with_players_count: rostersWithPlayersCount,
-        roster_players_count: totalRosterPlayersCount,
+        total_groups: leagueGroups.length,
+        active_groups: activeGroups.length,
+        history_groups: historyGroups.length,
         trades_count: tradesCount,
-        players_master_count: allPlayers.length,
+        players_master_count: playerCount,
+        current_nfl_season: getCurrentNFLSeason(),
       });
     } catch (e) {
       console.error("Debug endpoint error:", e);
@@ -867,9 +888,11 @@ export async function registerRoutes(
   });
 
   // GET /api/group/:groupId/trades - Get trades for a league group
+  // Optional query param: username - filter to only trades involving this user
   app.get(api.sleeper.trades.path, async (req, res) => {
     try {
       const { groupId } = req.params;
+      const { username } = req.query;
 
       // Get all leagues in this group
       const allLeagues = await cache.getAllLeaguesMap();
@@ -886,13 +909,67 @@ export async function registerRoutes(
         return res.status(404).json({ message: "League group not found" });
       }
 
+      // If username provided, get user's roster_id for each league
+      let userRosterIds: Map<string, number> | null = null;
+      let userId: string | null = null;
+      if (username && typeof username === "string") {
+        const cachedUser = await cache.getUserByUsername(username);
+        if (cachedUser) {
+          userId = cachedUser.user_id;
+          userRosterIds = new Map();
+          for (const leagueId of groupLeagueIds) {
+            const roster = await cache.getRosterForUserInLeague(leagueId, userId);
+            if (roster) {
+              userRosterIds.set(leagueId, roster.roster_id);
+            }
+          }
+        }
+      }
+
       // Get trades for all leagues in group
       const trades: any[] = [];
+      let totalTradesChecked = 0;
+      
       for (const leagueId of groupLeagueIds) {
         const leagueTrades = await cache.getTradesForLeague(leagueId);
         const league = await cache.getLeagueById(leagueId);
+        totalTradesChecked += leagueTrades.length;
         
         for (const trade of leagueTrades) {
+          // Parse roster_ids to check user involvement
+          const rosterIds = trade.roster_ids ? JSON.parse(trade.roster_ids) : [];
+          
+          // If filtering by username, check if user is involved in trade
+          if (userRosterIds) {
+            const myRosterId = userRosterIds.get(leagueId);
+            const isInvolved = myRosterId && rosterIds.includes(myRosterId);
+            
+            // Also check adds/drops structure as fallback
+            let involvedViaAddsDrops = false;
+            if (!isInvolved && userId) {
+              const parsedAdds = trade.adds ? JSON.parse(trade.adds) : null;
+              const parsedDrops = trade.drops ? JSON.parse(trade.drops) : null;
+              const draftPicks = trade.draft_picks ? JSON.parse(trade.draft_picks) : [];
+              
+              // Check if user's roster_id appears in adds/drops values or draft_picks
+              if (myRosterId) {
+                if (parsedAdds) {
+                  involvedViaAddsDrops = Object.values(parsedAdds).includes(myRosterId);
+                }
+                if (!involvedViaAddsDrops && parsedDrops) {
+                  involvedViaAddsDrops = Object.values(parsedDrops).includes(myRosterId);
+                }
+                if (!involvedViaAddsDrops && draftPicks.length > 0) {
+                  involvedViaAddsDrops = draftPicks.some((p: any) => 
+                    p.owner_id === myRosterId || p.previous_owner_id === myRosterId
+                  );
+                }
+              }
+            }
+            
+            if (!isInvolved && !involvedViaAddsDrops) continue;
+          }
+          
           // Parse adds and drops, resolve player names
           const parsedAdds = trade.adds ? JSON.parse(trade.adds) : null;
           const parsedDrops = trade.drops ? JSON.parse(trade.drops) : null;
@@ -930,7 +1007,7 @@ export async function registerRoutes(
             season: league?.season,
             status: trade.status,
             created_at: trade.created_at,
-            roster_ids: trade.roster_ids ? JSON.parse(trade.roster_ids) : [],
+            roster_ids: rosterIds,
             adds: Object.keys(addsWithNames).length > 0 ? addsWithNames : null,
             drops: Object.keys(dropsWithNames).length > 0 ? dropsWithNames : null,
             draft_picks: trade.draft_picks ? JSON.parse(trade.draft_picks) : null,
@@ -944,6 +1021,8 @@ export async function registerRoutes(
       res.json({
         group_id: groupId,
         trades,
+        seasons_checked: groupLeagueIds.length,
+        total_trades_in_db: totalTradesChecked,
       });
     } catch (e) {
       console.error("Trades error:", e);
@@ -952,7 +1031,7 @@ export async function registerRoutes(
   });
 
   // GET /api/players/exposure - Get player exposure for a user
-  // Counts only CURRENT leagues (latest season per group_id) with pagination
+  // Counts only ACTIVE leagues (latest season per group_id where user has roster and league is active) with pagination
   app.get(api.sleeper.playerExposure.path, async (req, res) => {
     try {
       const { username, page: pageStr, pageSize: pageSizeStr, pos, search, sort } = req.query;
@@ -973,25 +1052,24 @@ export async function registerRoutes(
       }
 
       const userId = cachedUser.user_id;
+      
+      // Use buildLeagueGroups to get active vs history classification
+      const leagueGroups = await buildLeagueGroups(userId);
+      const activeGroups = leagueGroups.filter(g => g.is_active);
+      const historyGroups = leagueGroups.filter(g => !g.is_active);
+      
+      const activeGroupCount = activeGroups.length;
+      const historyGroupCount = historyGroups.length;
+      
+      // Get only ACTIVE leagues: latest league_id from each active group
+      const activeLeagueIds = activeGroups.map(g => g.latest_league_id).filter(Boolean) as string[];
       const allLeagues = await cache.getLeaguesForUser(userId);
+      const activeLeagues = allLeagues.filter(l => activeLeagueIds.includes(l.league_id));
       
-      // Get only CURRENT leagues: latest season per group_id
-      // Group leagues by group_id, keep only max season per group
-      const groupMap = new Map<string, typeof allLeagues[0]>();
-      for (const league of allLeagues) {
-        const groupId = league.group_id || league.league_id;
-        const existing = groupMap.get(groupId);
-        if (!existing || (league.season && existing.season && league.season > existing.season)) {
-          groupMap.set(groupId, league);
-        }
-      }
-      const currentLeagues = Array.from(groupMap.values());
-      const totalLeagues = currentLeagues.length;
-      
-      // Count player occurrences across CURRENT leagues only
+      // Count player occurrences across ACTIVE leagues only
       const playerCounts = new Map<string, { count: number; leagueNames: string[] }>();
       
-      for (const league of currentLeagues) {
+      for (const league of activeLeagues) {
         const roster = await cache.getRosterForUserInLeague(league.league_id, userId);
         if (!roster) continue;
 
@@ -1008,6 +1086,7 @@ export async function registerRoutes(
       }
 
       // Build full exposure list with player details
+      // Denominator is activeGroupCount (not total leagues, not all groups)
       const allExposures = await Promise.all(
         Array.from(playerCounts.entries()).map(async ([playerId, { count, leagueNames }]) => {
           const player = await cache.getPlayer(playerId);
@@ -1024,8 +1103,8 @@ export async function registerRoutes(
               years_exp: player?.years_exp || null,
             },
             leagues_owned: count,
-            total_leagues: totalLeagues,
-            exposure_pct: totalLeagues > 0 ? Math.round((count / totalLeagues) * 100) : 0,
+            total_leagues: activeGroupCount,
+            exposure_pct: activeGroupCount > 0 ? Math.round((count / activeGroupCount) * 100) : 0,
             league_names: leagueNames,
           };
         })
@@ -1073,7 +1152,9 @@ export async function registerRoutes(
 
       res.json({
         username,
-        total_leagues: totalLeagues,
+        active_leagues: activeGroupCount,
+        history_leagues: historyGroupCount,
+        total_leagues: activeGroupCount, // Keep for backwards compatibility
         total_players: totalPlayers,
         page,
         pageSize,
@@ -1669,23 +1750,32 @@ export async function registerRoutes(
       else if (luckIndex < -10) luckLabel = "unlucky";
       else if (luckIndex < -5) luckLabel = "slightly_unlucky";
 
+      // Compute expected wins based on all-play win rate
+      const expectedWins = allPlayWinRate * totalActualGames;
+      const luckDiff = actualWins - expectedWins;
+      
       res.json({
         league_id: leagueId,
         username,
         roster_id: userRosterId,
         weeks_played: weeksPlayed,
+        teams: leagueSize,
         all_play: {
           wins: allPlayWins,
           losses: allPlayLosses,
           ties: allPlayTies,
+          games: totalAllPlayGames,
           win_rate: Math.round(allPlayWinRate * 100),
         },
         actual: {
           wins: actualWins,
           losses: actualLosses,
           ties: actualTies,
+          games: totalActualGames,
           win_rate: Math.round(actualWinRate * 100),
         },
+        expected_wins: Math.round(expectedWins * 10) / 10,
+        luck_diff: Math.round(luckDiff * 10) / 10,
         luck_index: luckIndex,
         luck_label: luckLabel,
       });
