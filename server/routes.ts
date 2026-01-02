@@ -53,6 +53,10 @@ async function getAllPlayers() {
   return jget(`${BASE}/players/nfl`);
 }
 
+async function getTradedPicks(leagueId: string) {
+  return jget(`${BASE}/league/${leagueId}/traded_picks`);
+}
+
 // Concurrency limiter
 async function withConcurrencyLimit<T>(
   items: T[],
@@ -1208,6 +1212,267 @@ export async function registerRoutes(
       });
     } catch (e) {
       console.error("Scouting stats error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/draft-capital?username=<username>
+  // Returns draft capital (owned picks by year/round) for a user in a specific league
+  app.get("/api/league/:leagueId/draft-capital", async (req, res) => {
+    const { leagueId } = req.params;
+    const username = req.query.username as string;
+
+    if (!username) {
+      return res.status(400).json({ message: "Missing username" });
+    }
+
+    try {
+      // Get user and rosters to find their roster_id
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const rosters = await cache.getRostersForLeague(leagueId);
+      const userRoster = rosters.find(r => r.owner_id === cachedUser.user_id);
+      
+      if (!userRoster) {
+        return res.status(404).json({ message: "User not in this league" });
+      }
+
+      const userRosterId = userRoster.roster_id;
+      const totalRosters = rosters.length;
+
+      // Fetch traded picks from Sleeper API
+      const tradedPicks = await getTradedPicks(leagueId) as Array<{
+        season: string;
+        round: number;
+        roster_id: number;
+        previous_owner_id: number;
+        owner_id: number;
+      }> | null;
+
+      // Extract unique years from traded picks data (only show years that have trade data)
+      const yearsFromData = new Set<string>();
+      if (tradedPicks && Array.isArray(tradedPicks)) {
+        for (const pick of tradedPicks) {
+          yearsFromData.add(pick.season);
+        }
+      }
+      
+      // Sort years and take only active seasons (years with traded pick data)
+      const years = Array.from(yearsFromData).sort();
+      const rounds = [1, 2, 3, 4];
+
+      // Track user's picks: acquired and traded away
+      const userPicks: Array<{ year: string; round: number; originalOwner: number }> = [];
+      const tradedAwayPicks: Array<{ year: string; round: number; newOwner: number }> = [];
+
+      if (tradedPicks && Array.isArray(tradedPicks)) {
+        for (const pick of tradedPicks) {
+          // If user is the new owner (acquired pick from another roster)
+          if (pick.owner_id === userRosterId && pick.roster_id !== userRosterId) {
+            userPicks.push({
+              year: pick.season,
+              round: pick.round,
+              originalOwner: pick.roster_id,
+            });
+          }
+          // If user was previous owner and no longer owns (traded away)
+          if (pick.previous_owner_id === userRosterId && pick.owner_id !== userRosterId) {
+            tradedAwayPicks.push({
+              year: pick.season,
+              round: pick.round,
+              newOwner: pick.owner_id,
+            });
+          }
+        }
+      }
+
+      // Calculate user's picks by year/round based on trade activity
+      // For each year, start with 1 (own pick) then adjust based on trades
+      const ownedPicks: Record<string, Record<number, number>> = {};
+      for (const year of years) {
+        ownedPicks[year] = {};
+        for (const round of rounds) {
+          // Start with 1 (user's own pick for this round)
+          ownedPicks[year][round] = 1;
+        }
+      }
+
+      // Add acquired picks (picks traded TO user)
+      for (const pick of userPicks) {
+        if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
+          ownedPicks[pick.year][pick.round]++;
+        }
+      }
+
+      // Remove traded away picks (user's picks traded away)
+      for (const pick of tradedAwayPicks) {
+        if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
+          ownedPicks[pick.year][pick.round]--;
+        }
+      }
+
+      // Calculate totals (only for years with actual data)
+      let totalR1 = 0, totalR2 = 0, totalR3 = 0, totalR4 = 0;
+      for (const year of years) {
+        totalR1 += Math.max(0, ownedPicks[year][1] || 0);
+        totalR2 += Math.max(0, ownedPicks[year][2] || 0);
+        totalR3 += Math.max(0, ownedPicks[year][3] || 0);
+        totalR4 += Math.max(0, ownedPicks[year][4] || 0);
+      }
+      const totalPicks = totalR1 + totalR2 + totalR3 + totalR4;
+
+      // Pick Hoard Index: weighted sum of round 1-2 picks
+      const pickHoardIndex = totalR1 * 2 + totalR2;
+
+      res.json({
+        league_id: leagueId,
+        username,
+        roster_id: userRosterId,
+        picks_by_year: ownedPicks,
+        totals: {
+          r1: totalR1,
+          r2: totalR2,
+          r3: totalR3,
+          r4: totalR4,
+          total: totalPicks,
+        },
+        pick_hoard_index: pickHoardIndex,
+        acquired_picks: userPicks,
+        traded_away_picks: tradedAwayPicks,
+      });
+    } catch (e) {
+      console.error("Draft capital error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/churn?username=<username>
+  // Returns roster churn stats (waiver moves, transactions) for a user
+  app.get("/api/league/:leagueId/churn", async (req, res) => {
+    const { leagueId } = req.params;
+    const username = req.query.username as string;
+
+    if (!username) {
+      return res.status(400).json({ message: "Missing username" });
+    }
+
+    try {
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const rosters = await cache.getRostersForLeague(leagueId);
+      const userRoster = rosters.find(r => r.owner_id === cachedUser.user_id);
+      
+      if (!userRoster) {
+        return res.status(404).json({ message: "User not in this league" });
+      }
+
+      const userRosterId = userRoster.roster_id;
+
+      // Fetch transactions (non-trade) from cache or compute from trades table
+      // For now, use trades table and filter for waiver/free_agent types
+      const leagueTxns = await cache.getTradesForLeague(leagueId);
+      
+      // Count adds/drops for the user (waiver moves stored in roster_ids)
+      let addsCount = 0;
+      let dropsCount = 0;
+      let tradeCount = 0;
+
+      for (const txn of leagueTxns) {
+        // Parse roster_ids to check if user is involved
+        let rosterIds: number[] = [];
+        try {
+          rosterIds = txn.roster_ids ? JSON.parse(txn.roster_ids) : [];
+        } catch { }
+
+        if (!rosterIds.includes(userRosterId)) continue;
+
+        // Count based on transaction type
+        if (txn.status === "complete") {
+          // Parse adds/drops
+          try {
+            const adds = JSON.parse(txn.adds || "{}") as Record<string, number>;
+            for (const [playerId, rosterId] of Object.entries(adds)) {
+              if (rosterId === userRosterId) addsCount++;
+            }
+          } catch { }
+
+          try {
+            const drops = JSON.parse(txn.drops || "{}") as Record<string, number>;
+            for (const [playerId, rosterId] of Object.entries(drops)) {
+              if (rosterId === userRosterId) dropsCount++;
+            }
+          } catch { }
+
+          // Check if this is a trade (has draft_picks or multiple roster_ids)
+          if (rosterIds.length > 1) {
+            tradeCount++;
+          }
+        }
+      }
+
+      // Calculate churn rate (moves per transaction count or estimated weeks)
+      const totalMoves = addsCount + dropsCount;
+      const estimatedWeeks = 18; // NFL season weeks
+      const churnRate = Math.round((totalMoves / estimatedWeeks) * 10) / 10;
+
+      // Get league-wide stats for comparison
+      const allUserMoves: Array<{ roster_id: number; moves: number }> = [];
+      for (const roster of rosters) {
+        let rosterMoves = 0;
+        for (const txn of leagueTxns) {
+          let rosterIds: number[] = [];
+          try { rosterIds = txn.roster_ids ? JSON.parse(txn.roster_ids) : []; } catch { }
+          if (!rosterIds.includes(roster.roster_id)) continue;
+
+          try {
+            const adds = JSON.parse(txn.adds || "{}") as Record<string, number>;
+            for (const [_, rid] of Object.entries(adds)) {
+              if (rid === roster.roster_id) rosterMoves++;
+            }
+          } catch { }
+          try {
+            const drops = JSON.parse(txn.drops || "{}") as Record<string, number>;
+            for (const [_, rid] of Object.entries(drops)) {
+              if (rid === roster.roster_id) rosterMoves++;
+            }
+          } catch { }
+        }
+        allUserMoves.push({ roster_id: roster.roster_id, moves: rosterMoves });
+      }
+
+      allUserMoves.sort((a, b) => b.moves - a.moves);
+      const rank = allUserMoves.findIndex(m => m.roster_id === userRosterId) + 1;
+      
+      // Compute league average excluding the current user for fair comparison
+      const otherMoves = allUserMoves.filter(m => m.roster_id !== userRosterId);
+      const leagueAvg = otherMoves.length > 0 
+        ? Math.round((otherMoves.reduce((s, m) => s + m.moves, 0) / otherMoves.length) * 10) / 10 
+        : 0;
+
+      res.json({
+        league_id: leagueId,
+        username,
+        roster_id: userRosterId,
+        adds: addsCount,
+        drops: dropsCount,
+        trades: tradeCount,
+        total_moves: totalMoves,
+        churn_rate: churnRate,
+        league_rank: rank,
+        league_size: rosters.length,
+        league_avg_moves: leagueAvg,
+        activity_level: totalMoves > leagueAvg * 1.5 ? "very_active" :
+          totalMoves > leagueAvg ? "active" :
+          totalMoves > leagueAvg * 0.5 ? "moderate" : "inactive",
+      });
+    } catch (e) {
+      console.error("Churn stats error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

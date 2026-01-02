@@ -312,6 +312,12 @@ export const cache = {
     return result as CachedRoster[];
   },
 
+  async getRostersForLeague(leagueId: string): Promise<CachedRoster[]> {
+    const result = await db.select().from(schema.rosters)
+      .where(eq(schema.rosters.league_id, leagueId));
+    return result as CachedRoster[];
+  },
+
   async updateRosterPlayers(leagueId: string, ownerId: string, playerIds: string[]): Promise<void> {
     const now = Date.now();
     await db.delete(schema.roster_players)

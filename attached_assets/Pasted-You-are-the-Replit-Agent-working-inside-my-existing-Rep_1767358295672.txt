@@ -1,0 +1,201 @@
+You are the Replit Agent working inside my existing Replit project (Sleeper Scout). DO NOT rewrite the app. Make minimal, clean changes. Preserve current styling/theme.
+
+We have two objectives in this pass:
+(1) FIX the Player Exposure bugs (wrong league count + no pagination)
+(2) ADD the next “scouting ROI” features (Draft Capital panel + All-Play/Luck Index + Churn + Trade propensity/timing), implemented in a way that uses cached Sleeper data and doesn’t blow up API usage.
+
+First: inspect the repo to find:
+- current exposure endpoint + query logic
+- how “Leagues count” is computed on Players tab
+- any hard LIMIT 100 behavior in API or UI
+- where league grouping (group_id / “league histories”) is computed
+
+────────────────────────────────────────────────────────────
+PART A — FIX PLAYER EXPOSURE (CRITICAL BUGS)
+────────────────────────────────────────────────────────────
+BUG 1: “95 leagues” is wrong; it’s counting historical season instances.
+We want CURRENT leagues only.
+Definition of CURRENT leagues:
+- One per league history group_id (dynasty rollover should count as 1).
+- For each group_id, use ONLY the latest season league_id in that group.
+- Denominator = number of latest league_ids (i.e., number of groups), not number of season instances.
+
+Implement helper:
+getLatestLeaguesForUser(username):
+- Query leagues for that user grouped by group_id
+- Select the league_id with MAX(season) per group_id
+- Return list of latest league_ids + totalLeagues = count(list)
+
+Exposure aggregation must use ONLY those latest league_ids.
+ExposurePct = leaguesOwned / totalLeagues.
+
+BUG 2: “All positions” returns only 100 entries out of 460; no next page.
+Add pagination to API + UI.
+
+Backend:
+Update GET /api/players/exposure?username=...
+Add params:
+- page (default 1)
+- pageSize (default 100, max 200)
+- pos (optional, e.g. QB/RB/WR/TE/K/DEF)
+- search (optional)
+- sort (exposure_desc|exposure_asc|name_asc|name_desc|leagues_desc|leagues_asc)
+
+Return JSON:
+{
+  totalPlayers,
+  totalLeagues,          // latestLeagueCount
+  page,
+  pageSize,
+  hasNext,
+  items: [
+    { playerId, name, pos, team, leaguesOwned, exposurePct }
+  ]
+}
+
+UI:
+- Add Next/Prev buttons OR “Load more”
+- Display “Showing X–Y of totalPlayers” and “Page X of Y”
+- Ensure All Positions can page through all results (all 460+)
+
+Robustness:
+- If players_master is missing/incomplete, still return playerId and show it as fallback label.
+- Don’t hide rows just because name lookup fails.
+
+Acceptance checks (Player Exposure):
+- For @henes35, totalLeagues should match CURRENT league groups (not 95).
+- Paging should allow viewing all players beyond first 100.
+
+────────────────────────────────────────────────────────────
+PART B — ADD SCOUTING ROI FEATURES (NEXT BUILD)
+────────────────────────────────────────────────────────────
+These features should be built as “Behavior Profile” signals derived from Sleeper data, not just raw lists.
+
+Add a toggle in league detail and compare views:
+- “Current Snapshot” (default)
+- “Behavior Profile” (history-based traits)
+
+IMPORTANT: Avoid massive API calls:
+- Use cached DB data wherever possible.
+- Only fetch matchups/transactions when needed and store results.
+- Concurrency limits: matchups <= 2, transactions <= 4.
+
+────────────────────────────────────────────────────────────
+B1) DRAFT CAPITAL PANEL (PER LEAGUE HISTORY)
+────────────────────────────────────────────────────────────
+Goal: In league detail view, show the user’s draft capital (owned picks by year + round).
+
+Data sources (Sleeper):
+- traded_picks endpoint for the league_id
+- league settings if needed for draft year context
+
+Implementation:
+- For each league history group_id, use the latest league_id (current season) to fetch:
+  GET /league/<league_id>/traded_picks
+- Combine with default pick ownership (each roster naturally owns its own picks unless traded).
+- Output for the viewed user:
+  - Picks by year: 2026 1st/2nd/3rd/4th etc.
+  - Count totals and a simple “Pick Hoard Index” (e.g., total picks in rounds 1–2)
+
+Store:
+- traded_picks cache table OR store in leagues.raw_json if simpler, but prefer a table:
+  draft_picks(league_id, season, roster_id, year, round, original_owner_id, current_owner_id, updated_at)
+
+UI:
+- On league detail page, show a “Draft Capital” card with a grid:
+  Year | R1 | R2 | R3 | R4
+- Use badges and totals.
+
+────────────────────────────────────────────────────────────
+B2) ALL-PLAY + LUCK INDEX (STRENGTH VS RECORD)
+────────────────────────────────────────────────────────────
+Goal: Show “true strength” vs win-loss luck, derived from weekly points.
+This is more predictive than record.
+
+Definition:
+For each week:
+- All-Play wins = number of teams you outscored that week
+- All-Play losses = number of teams that outscored you
+Aggregate across weeks -> All-Play Win%
+Expected wins can be approximated from All-Play win% * games played
+Luck Index = Actual Wins (official or H2H-only) - Expected Wins
+
+Data source:
+- matchups endpoint by week (use the league’s matchup weeks)
+GET /league/<league_id>/matchups/<week>
+
+Implementation:
+- Compute this for the viewed user for the latest season league_id by default.
+- Optional: compute across all seasons in group when Behavior Profile is selected.
+
+Store:
+- weekly_scores(league_id, week, roster_id, points)
+- all_play_summary(league_id, roster_id, all_play_wins, all_play_losses, all_play_pct, expected_wins, luck_index)
+
+UI:
+- In league detail, add “Strength” card:
+  PF, PA, All-Play %, Expected Wins, Luck Index
+- Explain briefly: “All-Play compares you against every team each week.”
+
+────────────────────────────────────────────────────────────
+B3) CHURN RATE (ADDS/DROPS + TURNOVER)
+────────────────────────────────────────────────────────────
+Goal: Identify managers who churn rosters vs patient holders.
+
+Data source:
+- transactions endpoint by week
+GET /league/<league_id>/transactions/<week>
+
+Implementation:
+- For the viewed user’s roster_id, count:
+  adds count, drops count, waivers count (if present), total moves
+- Churn Rate = total moves / weeks (or / season)
+
+Store:
+- roster_moves(league_id, roster_id, week, adds_count, drops_count, updated_at)
+- churn_summary(league_id, roster_id, churn_rate, total_moves)
+
+UI:
+- Add “Churn” card:
+  Total moves, moves/week, rank in league if possible.
+
+────────────────────────────────────────────────────────────
+B4) TRADE PROPENSITY + TIMING
+────────────────────────────────────────────────────────────
+Goal: Scouting trait: how often they trade and when (draft window vs in-season).
+
+Implementation:
+- Using cached trades (type=trade) from transactions:
+  - Trades per season
+  - Trades by month (if created_at available)
+  - Draft-window trades (e.g., May–Aug) vs in-season (Sep–Dec)
+- Compute “Trade Aggression Index”:
+  trades_per_season normalized by league median
+
+Store:
+- trade_summary(league_id, roster_id, trades_count, trades_per_month_json, draft_window_pct, updated_at)
+
+UI:
+- Add “Trading” card:
+  Trades this season, trades lifetime (if Behavior Profile), peak months, draft-window %
+
+────────────────────────────────────────────────────────────
+B5) OPTIONAL: ROOKIE HOLD HALF-LIFE (ONLY IF DATA SUPPORTS)
+────────────────────────────────────────────────────────────
+If feasible with available transaction + roster history:
+- Track time between acquiring a rookie (draft/trade) and trading/dropping.
+If too complex, skip for now and leave a TODO comment.
+
+────────────────────────────────────────────────────────────
+DELIVERABLES / ACCEPTANCE TESTS
+────────────────────────────────────────────────────────────
+PLAYER EXPOSURE:
+1) Total leagues equals CURRENT league groups (latest league per group_id)
+2) Paging works for >100 players
+
+SCOUTING FEATURES:
+3) League detail page shows Draft Capital, Strength (All-Play + Luck), Churn, Trade Propensity
+4) Behavior Profile toggle switches between “current snapshot” and “history-based traits”
+5) All features use caching and do not spam Sleeper API (respect concurrency limits)
+
+Proceed now: implement these changes with minimal disruption and add short inline comments for the main metrics.

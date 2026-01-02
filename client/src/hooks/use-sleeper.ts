@@ -235,3 +235,41 @@ export function useScoutingStats(username: string | undefined) {
     enabled: !!username && username.length > 0,
   });
 }
+
+// GET /api/league/:leagueId/draft-capital?username=... - Get draft capital for a league
+export function useDraftCapital(leagueId: string | undefined, username: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "draft-capital", username],
+    queryFn: async () => {
+      if (!leagueId || !username) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/draft-capital?username=${encodeURIComponent(username)}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch draft capital");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId && !!username,
+  });
+}
+
+// GET /api/league/:leagueId/churn?username=... - Get churn stats for a league
+export function useChurnStats(leagueId: string | undefined, username: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "churn", username],
+    queryFn: async () => {
+      if (!leagueId || !username) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/churn?username=${encodeURIComponent(username)}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch churn stats");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId && !!username,
+  });
+}

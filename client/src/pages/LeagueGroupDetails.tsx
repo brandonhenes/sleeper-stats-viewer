@@ -1,9 +1,9 @@
 import { useParams, Link } from "wouter";
-import { useSleeperOverview, useH2h, useTrades } from "@/hooks/use-sleeper";
+import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, ArrowRightLeft } from "lucide-react";
+import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, ArrowRightLeft, Layers, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import { Layout } from "@/components/Layout";
 import {
@@ -27,6 +27,12 @@ export default function LeagueGroupDetails() {
   const { data: tradesData, isLoading: tradesLoading } = useTrades(groupId);
 
   const leagueGroup = overviewData?.league_groups.find((g) => g.group_id === groupId);
+  
+  // Get the latest league_id for the group (for draft capital and churn)
+  const latestLeagueId = leagueGroup?.league_ids[leagueGroup.league_ids.length - 1];
+  
+  const { data: draftCapitalData, isLoading: draftCapitalLoading } = useDraftCapital(latestLeagueId, username);
+  const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username);
 
   const backLink = username ? `/u/${username}` : "/";
 
@@ -267,11 +273,160 @@ export default function LeagueGroupDetails() {
             )}
           </motion.div>
 
-          {/* Trades Section */}
+          {/* Draft Capital & Churn Section */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.1 }}
+            className="mt-8"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Draft Capital Card */}
+              <Card className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Layers className="w-5 h-5 text-primary" />
+                  <h3 className="text-lg font-bold">Draft Capital</h3>
+                </div>
+                
+                {draftCapitalLoading && (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!draftCapitalLoading && draftCapitalData && (
+                  <>
+                    <div className="space-y-3">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-20">Year</TableHead>
+                            <TableHead className="text-center">R1</TableHead>
+                            <TableHead className="text-center">R2</TableHead>
+                            <TableHead className="text-center">R3</TableHead>
+                            <TableHead className="text-center">R4</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {Object.entries(draftCapitalData.picks_by_year).map(([year, rounds]: [string, any]) => (
+                            <TableRow key={year}>
+                              <TableCell className="font-mono text-muted-foreground">{year}</TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant={rounds[1] > 1 ? "default" : rounds[1] === 0 ? "secondary" : "outline"}>
+                                  {rounds[1]}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant={rounds[2] > 1 ? "default" : rounds[2] === 0 ? "secondary" : "outline"}>
+                                  {rounds[2]}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant={rounds[3] > 1 ? "default" : rounds[3] === 0 ? "secondary" : "outline"}>
+                                  {rounds[3]}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant={rounds[4] > 1 ? "default" : rounds[4] === 0 ? "secondary" : "outline"}>
+                                  {rounds[4]}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-border/50 flex items-center justify-between gap-4 flex-wrap">
+                      <div>
+                        <div className="text-sm text-muted-foreground">Total Picks</div>
+                        <div className="text-xl font-bold font-mono">{draftCapitalData.totals.total}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Hoard Index</div>
+                        <div className="text-xl font-bold font-mono">{draftCapitalData.pick_hoard_index}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">1st Rounders</div>
+                        <div className="text-xl font-bold font-mono">{draftCapitalData.totals.r1}</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {!draftCapitalLoading && !draftCapitalData && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No draft capital data available</p>
+                )}
+              </Card>
+
+              {/* Churn Rate Card */}
+              <Card className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <RefreshCw className="w-5 h-5 text-primary" />
+                  <h3 className="text-lg font-bold">Roster Activity</h3>
+                </div>
+
+                {churnLoading && (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!churnLoading && churnData && (
+                  <>
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">{churnData.adds}</div>
+                        <div className="text-xs text-muted-foreground">Adds</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">{churnData.drops}</div>
+                        <div className="text-xs text-muted-foreground">Drops</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold font-mono">{churnData.trades}</div>
+                        <div className="text-xs text-muted-foreground">Trades</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Total Moves</span>
+                        <span className="font-mono font-bold">{churnData.total_moves}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Moves/Week</span>
+                        <span className="font-mono">{churnData.churn_rate}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">League Rank</span>
+                        <span className="font-mono">#{churnData.league_rank} of {churnData.league_size}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Activity Level</span>
+                        <Badge variant={
+                          churnData.activity_level === "very_active" ? "default" :
+                          churnData.activity_level === "active" ? "secondary" : "outline"
+                        }>
+                          {churnData.activity_level.replace("_", " ")}
+                        </Badge>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {!churnLoading && !churnData && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No activity data available</p>
+                )}
+              </Card>
+            </div>
+          </motion.div>
+
+          {/* Trades Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.2 }}
             className="mt-8"
           >
             <div className="flex items-center gap-3 mb-6">
