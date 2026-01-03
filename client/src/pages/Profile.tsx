@@ -13,11 +13,13 @@ import { Progress } from "@/components/ui/progress";
 import { Layout } from "@/components/Layout";
 
 type LeagueType = "all" | "dynasty" | "redraft" | "unknown";
+type ViewMode = "active" | "history";
 
 export default function Profile() {
   const { username } = useParams<{ username: string }>();
   const [jobId, setJobId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<LeagueType>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("active");
   const { toast } = useToast();
 
   const { data, isLoading, error, isError, refetch } = useSleeperOverview(username);
@@ -88,7 +90,14 @@ export default function Profile() {
     }
   };
 
-  const leagueGroups = data?.league_groups || [];
+  const allLeagueGroups = data?.league_groups || [];
+  
+  // Split into active vs history groups based on is_active flag
+  const activeGroups = allLeagueGroups.filter(g => g.is_active !== false);
+  const historyGroups = allLeagueGroups.filter(g => g.is_active === false);
+  
+  // Use the selected view mode to determine base groups
+  const leagueGroups = viewMode === "active" ? activeGroups : historyGroups;
   
   const filteredGroups = leagueGroups.filter((g) => {
     if (typeFilter === "all") return true;
@@ -105,12 +114,14 @@ export default function Profile() {
     return date.toLocaleString();
   };
 
-  const totalWins = leagueGroups.reduce((acc, g) => acc + g.overall_record.wins, 0);
-  const totalLosses = leagueGroups.reduce((acc, g) => acc + g.overall_record.losses, 0);
-  const totalTies = leagueGroups.reduce((acc, g) => acc + g.overall_record.ties, 0);
+  // Stats computed from active groups only (default view)
+  const totalWins = activeGroups.reduce((acc, g) => acc + g.overall_record.wins, 0);
+  const totalLosses = activeGroups.reduce((acc, g) => acc + g.overall_record.losses, 0);
+  const totalTies = activeGroups.reduce((acc, g) => acc + g.overall_record.ties, 0);
   const totalGames = totalWins + totalLosses + totalTies;
   const winPct = totalGames > 0 ? ((totalWins + totalTies * 0.5) / totalGames * 100).toFixed(1) : "0.0";
 
+  // Type counts for current view mode
   const dynastyCount = leagueGroups.filter(g => g.league_type === "dynasty").length;
   const redraftCount = leagueGroups.filter(g => g.league_type === "redraft").length;
   const unknownCount = leagueGroups.filter(g => !g.league_type || g.league_type === "unknown").length;
@@ -179,8 +190,8 @@ export default function Profile() {
                   </div>
                   <div className="flex gap-6 text-center items-center flex-wrap justify-center">
                     <div>
-                      <div className="text-3xl font-bold text-primary font-display">{leagueGroups.length}</div>
-                      <div className="text-sm text-muted-foreground uppercase tracking-wider font-medium">Leagues</div>
+                      <div className="text-3xl font-bold text-primary font-display">{activeGroups.length}</div>
+                      <div className="text-sm text-muted-foreground uppercase tracking-wider font-medium">Active</div>
                     </div>
                     <div>
                       <div className="text-3xl font-bold text-primary font-display">
@@ -228,9 +239,30 @@ export default function Profile() {
                 </motion.div>
               )}
 
-              <div className="flex items-center gap-3 mb-6 flex-wrap">
-                <Filter className="w-5 h-5 text-muted-foreground" />
-                <div className="flex gap-2 flex-wrap">
+              <div className="flex items-center gap-4 mb-6 flex-wrap">
+                <div className="flex gap-2">
+                  <Button
+                    variant={viewMode === "active" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setViewMode("active")}
+                    data-testid="view-active"
+                  >
+                    Active ({activeGroups.length})
+                  </Button>
+                  <Button
+                    variant={viewMode === "history" ? "secondary" : "outline"}
+                    size="sm"
+                    onClick={() => setViewMode("history")}
+                    data-testid="view-history"
+                  >
+                    History ({historyGroups.length})
+                  </Button>
+                </div>
+                
+                <div className="h-6 w-px bg-border" />
+                
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Filter className="w-4 h-4 text-muted-foreground" />
                   <Badge
                     variant={typeFilter === "all" ? "default" : "outline"}
                     className="cursor-pointer"

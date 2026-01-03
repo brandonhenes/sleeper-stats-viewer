@@ -504,6 +504,85 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/debug/league?groupId=...&username=... - Debug endpoint for league-level info
+  app.get("/api/debug/league", async (req, res) => {
+    try {
+      const groupId = req.query.groupId as string;
+      const username = req.query.username as string;
+      
+      if (!groupId || !username) {
+        return res.status(400).json({ 
+          error: "groupId and username required",
+          group_found: false,
+          group_id: groupId || null,
+          username: username || null,
+        });
+      }
+
+      const user = await cache.getUserByUsername(username);
+      if (!user) {
+        return res.json({ 
+          error: "User not found in cache",
+          group_found: false,
+          group_id: groupId,
+          username: username,
+          current_nfl_season: getCurrentNFLSeason(),
+        });
+      }
+
+      const leagueGroups = await buildLeagueGroups(user.user_id);
+      const group = leagueGroups.find(g => g.group_id === groupId);
+      
+      if (!group) {
+        return res.json({ 
+          error: "Group not found for this user",
+          group_found: false,
+          group_id: groupId,
+          username: username,
+          user_id: user.user_id,
+          total_groups_available: leagueGroups.length,
+          available_group_ids: leagueGroups.map(g => g.group_id).slice(0, 5),
+          current_nfl_season: getCurrentNFLSeason(),
+        });
+      }
+
+      const latestLeagueId = group.league_ids[group.league_ids.length - 1];
+      const rosters = latestLeagueId ? await cache.getRostersForLeague(latestLeagueId) : [];
+      const userRoster = rosters.find(r => r.owner_id === user.user_id);
+      
+      // Count trades for this group
+      let groupTradesCount = 0;
+      for (const leagueId of group.league_ids) {
+        const trades = await cache.getTradesForLeague(leagueId);
+        groupTradesCount += trades.length;
+      }
+
+      return res.json({
+        group_found: true,
+        group_id: groupId,
+        group_name: group.name || "Unknown",
+        seasons: group.seasons || [],
+        league_ids: group.league_ids || [],
+        latest_league_id: latestLeagueId || null,
+        is_active: group.is_active ?? false,
+        league_type: group.league_type || "unknown",
+        user_roster_id: userRoster ? userRoster.roster_id : null,
+        user_in_latest_league: !!userRoster,
+        roster_count: rosters.length,
+        group_trades_count: groupTradesCount,
+        total_wins: group.total_wins ?? 0,
+        total_losses: group.total_losses ?? 0,
+        current_nfl_season: getCurrentNFLSeason(),
+      });
+    } catch (e) {
+      console.error("Debug league endpoint error:", e);
+      res.status(500).json({ 
+        error: e instanceof Error ? e.message : "Unknown error",
+        group_found: false,
+      });
+    }
+  });
+
   // GET /api/overview - Returns league groups with aggregated W-L records
   // Always returns cached data immediately with sync status flags
   app.get(api.sleeper.overview.path, async (req, res) => {
@@ -1430,11 +1509,13 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/league/:leagueId/churn?username=<username>
+  // GET /api/league/:leagueId/churn?username=<username>&timeframe=<season|last30|lifetime>
   // Returns roster churn stats (waiver moves, transactions) for a user
+  // timeframe: "season" (default), "last30" (last 30 days), "lifetime" (all time)
   app.get("/api/league/:leagueId/churn", async (req, res) => {
     const { leagueId } = req.params;
     const username = req.query.username as string;
+    const timeframe = (req.query.timeframe as string) || "season";
 
     if (!username) {
       return res.status(400).json({ message: "Missing username" });
@@ -1456,8 +1537,15 @@ export async function registerRoutes(
       const userRosterId = userRoster.roster_id;
 
       // Fetch transactions (non-trade) from cache or compute from trades table
-      // For now, use trades table and filter for waiver/free_agent types
-      const leagueTxns = await cache.getTradesForLeague(leagueId);
+      let leagueTxns = await cache.getTradesForLeague(leagueId);
+      
+      // Apply timeframe filter if needed
+      // For "last30" filter by created_at timestamp
+      if (timeframe === "last30") {
+        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        leagueTxns = leagueTxns.filter(t => t.created_at >= thirtyDaysAgo);
+      }
+      // "season" and "lifetime" use all transactions for this leagueId (season scope is implicit)
       
       // Count adds/drops for the user (waiver moves stored in roster_ids)
       let addsCount = 0;
@@ -1536,10 +1624,16 @@ export async function registerRoutes(
         ? Math.round((otherMoves.reduce((s, m) => s + m.moves, 0) / otherMoves.length) * 10) / 10 
         : 0;
 
+      // Determine timeframe label for UI display
+      const timeframeLabel = timeframe === "last30" ? "Last 30 Days" :
+        timeframe === "lifetime" ? "All Time" : "This Season";
+
       res.json({
         league_id: leagueId,
         username,
         roster_id: userRosterId,
+        timeframe,
+        timeframe_label: timeframeLabel,
         adds: addsCount,
         drops: dropsCount,
         trades: tradeCount,

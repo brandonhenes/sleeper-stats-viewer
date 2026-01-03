@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link } from "wouter";
 import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, useTradeTiming, useAllPlay } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
@@ -31,8 +32,11 @@ export default function LeagueGroupDetails() {
   // Get the latest league_id for the group (for draft capital and churn)
   const latestLeagueId = leagueGroup?.league_ids[leagueGroup.league_ids.length - 1];
   
+  // Churn timeframe state: "season", "last30", "lifetime"
+  const [churnTimeframe, setChurnTimeframe] = useState<string>("season");
+  
   const { data: draftCapitalData, isLoading: draftCapitalLoading } = useDraftCapital(latestLeagueId, username);
-  const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username);
+  const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username, churnTimeframe);
   const { data: tradeTimingData, isLoading: tradeTimingLoading } = useTradeTiming(latestLeagueId, username);
   const { data: allPlayData, isLoading: allPlayLoading } = useAllPlay(latestLeagueId, username);
 
@@ -363,9 +367,37 @@ export default function LeagueGroupDetails() {
 
               {/* Churn Rate Card */}
               <Card className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <RefreshCw className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-bold">Roster Activity</h3>
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-3">
+                    <RefreshCw className="w-5 h-5 text-primary" />
+                    <h3 className="text-lg font-bold">Roster Activity</h3>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant={churnTimeframe === "season" ? "default" : "ghost"}
+                      size="sm"
+                      onClick={() => setChurnTimeframe("season")}
+                      data-testid="button-churn-timeframe-season"
+                    >
+                      Season
+                    </Button>
+                    <Button
+                      variant={churnTimeframe === "last30" ? "default" : "ghost"}
+                      size="sm"
+                      onClick={() => setChurnTimeframe("last30")}
+                      data-testid="button-churn-timeframe-last30"
+                    >
+                      30 Days
+                    </Button>
+                    <Button
+                      variant={churnTimeframe === "lifetime" ? "default" : "ghost"}
+                      size="sm"
+                      onClick={() => setChurnTimeframe("lifetime")}
+                      data-testid="button-churn-timeframe-lifetime"
+                    >
+                      All Time
+                    </Button>
+                  </div>
                 </div>
 
                 {churnLoading && (
@@ -491,25 +523,52 @@ export default function LeagueGroupDetails() {
 
                 {!allPlayLoading && allPlayData && allPlayData.weeks_played > 0 && (
                   <>
+                    <div className="text-xs text-muted-foreground text-center mb-3">
+                      Based on {allPlayData.weeks_played} week{allPlayData.weeks_played !== 1 ? 's' : ''} played
+                    </div>
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       <div className="text-center">
                         <div className="text-2xl font-bold font-mono">
                           {allPlayData.actual.wins}-{allPlayData.actual.losses}
+                          {allPlayData.actual.ties > 0 && `-${allPlayData.actual.ties}`}
                         </div>
-                        <div className="text-xs text-muted-foreground">Actual Record</div>
+                        <div className="text-xs text-muted-foreground">
+                          Actual ({allPlayData.actual.games} game{allPlayData.actual.games !== 1 ? 's' : ''})
+                        </div>
                       </div>
                       <div className="text-center">
                         <div className="text-2xl font-bold font-mono">
                           {allPlayData.all_play.wins}-{allPlayData.all_play.losses}
+                          {allPlayData.all_play.ties > 0 && `-${allPlayData.all_play.ties}`}
                         </div>
-                        <div className="text-xs text-muted-foreground">All-Play Record</div>
+                        <div className="text-xs text-muted-foreground">
+                          All-Play ({allPlayData.all_play.games} game{allPlayData.all_play.games !== 1 ? 's' : ''})
+                        </div>
                       </div>
                     </div>
 
                     <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">All-Play Win %</span>
-                        <span className="font-mono">{allPlayData.all_play.win_rate}%</span>
+                        <span className="text-sm text-muted-foreground">
+                          Expected Wins (based on {allPlayData.all_play.games} games)
+                        </span>
+                        <span className="font-mono">
+                          {typeof allPlayData.expected_wins === 'number' 
+                            ? allPlayData.expected_wins.toFixed(1) 
+                            : allPlayData.expected_wins}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Luck Diff (actual - expected)</span>
+                        <span className={`font-mono ${
+                          allPlayData.luck_diff > 0 ? "text-green-500" : 
+                          allPlayData.luck_diff < 0 ? "text-red-500" : ""
+                        }`}>
+                          {allPlayData.luck_diff > 0 ? "+" : ""}
+                          {typeof allPlayData.luck_diff === 'number' 
+                            ? allPlayData.luck_diff.toFixed(1) 
+                            : allPlayData.luck_diff} wins
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Luck Index</span>
@@ -561,8 +620,13 @@ export default function LeagueGroupDetails() {
 
             {!tradesLoading && tradesData && tradesData.trades.length === 0 && (
               <Card className="p-6 text-center text-muted-foreground">
-                <p>No trades found for this league.</p>
-                <p className="text-sm mt-1">Trades will appear here after syncing.</p>
+                <p>No trades found for this league group.</p>
+                <p className="text-sm mt-2">
+                  Checked {tradesData.seasons_checked || 0} season{(tradesData.seasons_checked || 0) !== 1 ? 's' : ''} (rounds 0-22 each).
+                  {(tradesData.total_trades_in_db || 0) > 0 
+                    ? ` Found ${tradesData.total_trades_in_db} trade(s) in database, but none match current filters.`
+                    : ' No trades stored yet - sync to fetch trade data.'}
+                </p>
               </Card>
             )}
 

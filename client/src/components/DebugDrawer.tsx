@@ -21,6 +21,27 @@ interface DebugData {
   current_nfl_season?: number;
 }
 
+interface LeagueDebugData {
+  group_found: boolean;
+  group_id?: string;
+  group_name?: string;
+  seasons?: number[];
+  league_ids?: string[];
+  latest_league_id?: string;
+  is_active?: boolean;
+  league_type?: string;
+  user_roster_id?: number | null;
+  user_in_latest_league?: boolean;
+  roster_count?: number;
+  group_trades_count?: number;
+  total_wins?: number;
+  total_losses?: number;
+  current_nfl_season?: number;
+  error?: string;
+  total_groups_available?: number;
+  available_group_ids?: string[];
+}
+
 interface DebugDrawerProps {
   username?: string;
   groupId?: string;
@@ -44,6 +65,16 @@ export function DebugDrawer({ username, groupId, leagueId }: DebugDrawerProps) {
       return res.json();
     },
     enabled: isVisible && !!username,
+  });
+
+  const { data: leagueDebugData, isLoading: leagueLoading } = useQuery<LeagueDebugData>({
+    queryKey: ["/api/debug/league", groupId, username],
+    queryFn: async () => {
+      const res = await fetch(`/api/debug/league?groupId=${encodeURIComponent(groupId!)}&username=${encodeURIComponent(username!)}`);
+      if (!res.ok) throw new Error("Failed to fetch league debug data");
+      return res.json();
+    },
+    enabled: isVisible && !!groupId && !!username,
   });
 
   if (!isVisible) return null;
@@ -161,11 +192,60 @@ export function DebugDrawer({ username, groupId, leagueId }: DebugDrawerProps) {
                         <span>Group ID:</span>
                         <span className="font-mono text-[10px]">{groupId.slice(0, 12)}...</span>
                       </div>
-                      {leagueId && (
-                        <div className="flex justify-between">
-                          <span>League ID:</span>
-                          <span className="font-mono text-[10px]">{leagueId.slice(0, 12)}...</span>
-                        </div>
+                      {leagueLoading && (
+                        <div className="text-muted-foreground text-[10px]">Loading...</div>
+                      )}
+                      {leagueDebugData && leagueDebugData.group_found && (
+                        <>
+                          <div className="flex justify-between">
+                            <span>Name:</span>
+                            <span className="font-mono text-[10px] truncate max-w-[120px]" title={leagueDebugData.group_name}>
+                              {leagueDebugData.group_name}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Seasons:</span>
+                            <span className="font-mono text-[10px]">
+                              {leagueDebugData.seasons?.join(", ")}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Status:</span>
+                            <Badge 
+                              variant={leagueDebugData.is_active ? "default" : "secondary"} 
+                              className="text-[10px] px-1.5"
+                            >
+                              {leagueDebugData.is_active ? "Active" : "History"}
+                            </Badge>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Type:</span>
+                            <span className="font-mono text-[10px] capitalize">{leagueDebugData.league_type}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Latest League:</span>
+                            <span className="font-mono text-[10px]">{leagueDebugData.latest_league_id?.slice(0, 12)}...</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>User Roster ID:</span>
+                            <span className="font-mono text-[10px]">{leagueDebugData.user_roster_id ?? "N/A"}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Roster Count:</span>
+                            <span className="font-mono">{leagueDebugData.roster_count}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Group Trades:</span>
+                            <span className="font-mono">{leagueDebugData.group_trades_count}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Record:</span>
+                            <span className="font-mono">{leagueDebugData.total_wins}-{leagueDebugData.total_losses}</span>
+                          </div>
+                        </>
+                      )}
+                      {leagueDebugData && !leagueDebugData.group_found && (
+                        <div className="text-red-500 text-[10px]">{leagueDebugData.error || "Group not found"}</div>
                       )}
                     </div>
                   </div>

@@ -305,6 +305,8 @@ export const tradeSchema = z.object({
 export const tradesResponseSchema = z.object({
   group_id: z.string(),
   trades: z.array(tradeSchema),
+  seasons_checked: z.number().optional(),
+  total_trades_in_db: z.number().optional(),
 });
 
 export const playerSchema = z.object({

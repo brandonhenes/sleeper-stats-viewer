@@ -255,13 +255,14 @@ export function useDraftCapital(leagueId: string | undefined, username: string |
   });
 }
 
-// GET /api/league/:leagueId/churn?username=... - Get churn stats for a league
-export function useChurnStats(leagueId: string | undefined, username: string | undefined) {
+// GET /api/league/:leagueId/churn?username=...&timeframe=... - Get churn stats for a league
+// timeframe: "season" (default), "last30", "lifetime"
+export function useChurnStats(leagueId: string | undefined, username: string | undefined, timeframe: string = "season") {
   return useQuery({
-    queryKey: ["/api/league", leagueId, "churn", username],
+    queryKey: ["/api/league", leagueId, "churn", username, timeframe],
     queryFn: async () => {
       if (!leagueId || !username) return null;
-      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/churn?username=${encodeURIComponent(username)}`);
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/churn?username=${encodeURIComponent(username)}&timeframe=${encodeURIComponent(timeframe)}`);
       
       if (!res.ok) {
         if (res.status === 404) return null;
