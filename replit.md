@@ -109,6 +109,14 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 3, 2026 (Phase 0 Complete)
+- **Active/History Toggle**: Profile page now shows toggle to filter between active leagues (current season with roster) vs historical leagues
+- **Roster Activity Timeframe**: Churn stats card includes selector for "This Season", "Last 30 Days", or "Lifetime" transaction filtering
+- **Trade History Diagnostics**: Empty state now shows seasons checked, round coverage (0-22), and trade counts for debugging
+- **Luck Index Precision**: Card now displays explicit weeks played, game counts for both actual and all-play records, expected wins with decimal precision (.toFixed(1))
+- **Enhanced Debug Drawer**: When on league detail pages with ?debug=1, drawer shows group name, seasons, active/history status, roster presence, trade counts
+- **Hardened Endpoints**: Debug league endpoint returns consistent error structures with fallback values for all edge cases
+
 ### January 2, 2026
 - **Draft Capital Tracking**: Shows traded picks owned by year/round, derived from Sleeper's traded_picks API data only
 - **Roster Churn Rate**: Calculates waiver add/drop activity with league ranking (excludes current user from avg calculation)
