@@ -82,15 +82,13 @@ export default function Home() {
                 <div className="font-semibold text-foreground mb-1">Compare Users</div>
                 <div>Analyze tendencies between managers</div>
               </div>
-              <Link href="/market">
-                <div className="p-4 rounded-lg bg-card/50 border border-border/30 hover-elevate cursor-pointer" data-testid="link-market">
-                  <div className="font-semibold text-foreground mb-1 flex items-center justify-center gap-1">
-                    <TrendingUp className="w-4 h-4" />
-                    Market Trends
-                  </div>
-                  <div>Most traded players and picks</div>
+              <div className="p-4 rounded-lg bg-card/50 border border-border/30">
+                <div className="font-semibold text-foreground mb-1 flex items-center justify-center gap-1">
+                  <TrendingUp className="w-4 h-4" />
+                  Market Trends
                 </div>
-              </Link>
+                <div>Most traded players and picks</div>
+              </div>
             </div>
           </motion.div>
         </div>

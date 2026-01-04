@@ -1,12 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useParams } from "wouter";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from "wouter";
-import { ArrowLeft, TrendingUp, Users, Calendar, Package } from "lucide-react";
+import { TrendingUp, Users, Calendar, Package, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { Skeleton } from "@/components/ui/skeleton";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Layout } from "@/components/Layout";
 
 interface MarketTrends {
   totals: {
@@ -31,79 +34,158 @@ interface MarketTrends {
   }[];
 }
 
-function useMarketTrends() {
+function useMarketTrends(enabled: boolean) {
   return useQuery<MarketTrends>({
     queryKey: ["/api/market/trends"],
+    enabled,
+  });
+}
+
+function useMarketSync(username: string) {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/market/sync?username=${encodeURIComponent(username)}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/market/trends"] });
+    },
   });
 }
 
 export default function Market() {
-  const { data, isLoading, error } = useMarketTrends();
+  const { username } = useParams<{ username: string }>();
+  const [hasSynced, setHasSynced] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  
+  const syncMutation = useMarketSync(username || "");
+  const { data, isLoading, error, refetch } = useMarketTrends(hasSynced && !syncError);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (username && !hasSynced && !syncMutation.isPending && !syncError) {
+      syncMutation.mutate(undefined, {
+        onSuccess: () => {
+          setHasSynced(true);
+          setSyncError(null);
+        },
+        onError: (err: Error) => {
+          setHasSynced(true);
+          if (err.message.includes("404") || err.message.includes("not found")) {
+            setSyncError("Please sync your profile first to see market trends.");
+          } else {
+            setSyncError(err.message || "Failed to sync trade data.");
+          }
+        },
+      });
+    }
+  }, [username, hasSynced, syncMutation.isPending, syncError]);
+
+  const handleRefresh = () => {
+    if (username) {
+      setSyncError(null);
+      syncMutation.mutate(undefined, {
+        onSuccess: () => {
+          refetch();
+        },
+        onError: (err: Error) => {
+          setSyncError(err.message || "Failed to sync trade data.");
+        },
+      });
+    }
+  };
+
+  if (!username) {
     return (
-      <div className="min-h-screen bg-background">
-        <header className="border-b bg-card/50">
-          <div className="container mx-auto px-4 py-4">
-            <Skeleton className="h-8 w-48" />
+      <Layout>
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <Card className="max-w-md">
+            <CardContent className="py-8 text-center">
+              <p className="text-muted-foreground mb-4">
+                Please access Market Trends from your profile page.
+              </p>
+              <Link href="/">
+                <Button data-testid="link-go-home">Go Home</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (syncMutation.isPending || (isLoading && !data && !syncError)) {
+    return (
+      <Layout username={username}>
+        <main className="container mx-auto px-4 py-6 max-w-6xl">
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            <p className="text-muted-foreground">
+              {syncMutation.isPending ? "Syncing trade data from your leagues..." : "Loading market trends..."}
+            </p>
           </div>
-        </header>
-        <main className="container mx-auto px-4 py-6">
-          <div className="grid gap-4 md:grid-cols-3 mb-6">
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-          </div>
-          <Skeleton className="h-96" />
         </main>
-      </div>
+      </Layout>
+    );
+  }
+
+  if (syncError) {
+    return (
+      <Layout username={username}>
+        <main className="container mx-auto px-4 py-6 max-w-6xl">
+          <Card>
+            <CardContent className="py-8 text-center space-y-4">
+              <p className="text-muted-foreground">{syncError}</p>
+              <Link href={`/u/${username}`}>
+                <Button data-testid="link-sync-profile">
+                  Go to Profile
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </main>
+      </Layout>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-background">
-        <header className="border-b bg-card/50">
-          <div className="container mx-auto px-4 py-4">
-            <Link href="/">
-              <Button variant="ghost" size="sm" data-testid="link-back-home">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
-              </Button>
-            </Link>
-          </div>
-        </header>
-        <main className="container mx-auto px-4 py-6">
+      <Layout username={username}>
+        <main className="container mx-auto px-4 py-6 max-w-6xl">
           <Card>
             <CardContent className="py-8 text-center text-muted-foreground">
-              Failed to load market trends. Try syncing some league data first.
+              Failed to load market trends. Try syncing your profile first.
             </CardContent>
           </Card>
         </main>
-      </div>
+      </Layout>
     );
   }
 
   const { totals, most_traded_players, most_traded_picks, by_season } = data!;
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card/50">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/">
-            <Button variant="ghost" size="sm" data-testid="link-back-home">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
-            </Button>
-          </Link>
+    <Layout username={username}>
+      <main className="container mx-auto px-4 py-6 max-w-6xl space-y-6">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <TrendingUp className="w-5 h-5" />
             Market Trends
           </h1>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={syncMutation.isPending}
+            data-testid="button-refresh-market"
+          >
+            {syncMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Refresh
+          </Button>
         </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-6 space-y-6">
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -171,7 +253,7 @@ export default function Market() {
                 <CardContent>
                   {most_traded_players.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">
-                      No player trades found. Sync some leagues to see data.
+                      No player trades found in your leagues yet.
                     </p>
                   ) : (
                     <div className="space-y-2">
@@ -213,7 +295,7 @@ export default function Market() {
                 <CardContent>
                   {most_traded_picks.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">
-                      No pick trades found. Sync some leagues to see data.
+                      No pick trades found in your leagues yet.
                     </p>
                   ) : (
                     <div className="space-y-2">
@@ -253,7 +335,7 @@ export default function Market() {
                 <CardContent>
                   {by_season.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">
-                      No trade data available. Sync some leagues to see data.
+                      No trade data available yet.
                     </p>
                   ) : (
                     <div className="space-y-3">
@@ -264,7 +346,7 @@ export default function Market() {
                           data-testid={`row-season-${index}`}
                         >
                           <div className="font-medium">{season.season}</div>
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 flex-wrap">
                             <Badge variant="outline">
                               {season.trade_count} trade{season.trade_count !== 1 ? "s" : ""}
                             </Badge>
@@ -285,6 +367,6 @@ export default function Market() {
           </TabsContent>
         </Tabs>
       </main>
-    </div>
+    </Layout>
   );
 }

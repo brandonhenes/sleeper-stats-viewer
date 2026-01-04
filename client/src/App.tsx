@@ -24,7 +24,7 @@ function Router() {
       <Route path="/scouting/:username" component={Scouting} />
       <Route path="/compare" component={Compare} />
       <Route path="/compare/:userA/:userB" component={CompareResults} />
-      <Route path="/market" component={Market} />
+      <Route path="/market/:username" component={Market} />
       <Route path="/league/:id" component={LeagueDetails} />
       <Route path="/group/:groupId" component={LeagueGroupDetails} />
       <Route component={NotFound} />

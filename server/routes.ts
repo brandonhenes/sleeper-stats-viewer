@@ -3092,6 +3092,44 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/market/sync - Normalize trades for all of a user's leagues
+  app.post("/api/market/sync", async (req, res) => {
+    try {
+      const username = req.query.username as string;
+      if (!username) {
+        return res.status(400).json({ message: "username required" });
+      }
+
+      const user = await cache.getUserByUsername(username);
+      if (!user) {
+        return res.status(404).json({ message: "User not found. Please sync your profile first." });
+      }
+
+      const leagues = await cache.getLeaguesForUser(user.user_id);
+      let totalAssets = 0;
+      let leaguesProcessed = 0;
+
+      for (const league of leagues) {
+        try {
+          const count = await normalizeTradesForLeague(league.league_id);
+          totalAssets += count;
+          leaguesProcessed++;
+        } catch (e) {
+          console.error(`Failed to normalize trades for league ${league.league_id}:`, e);
+        }
+      }
+
+      res.json({
+        success: true,
+        leagues_processed: leaguesProcessed,
+        total_assets: totalAssets,
+      });
+    } catch (e) {
+      console.error("Market sync error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
   // GET /api/market/trends - Get market trends across all leagues
   app.get("/api/market/trends", async (req, res) => {
     try {

@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Users, Layers, Target } from "lucide-react";
+import { User, Users, Layers, Target, TrendingUp } from "lucide-react";
 import { DebugDrawer } from "./DebugDrawer";
 
 interface LayoutProps {
@@ -16,6 +16,7 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
   const getActiveTab = () => {
     if (location.includes("/players/")) return "players";
     if (location.includes("/scouting/")) return "scouting";
+    if (location.includes("/market/")) return "market";
     if (location.includes("/compare")) return "compare";
     return "profile";
   };
@@ -57,6 +58,14 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
                       <TabsTrigger value="scouting" className="gap-2" data-testid="tab-scouting">
                         <Target className="w-4 h-4" />
                         Scouting
+                      </TabsTrigger>
+                    </Link>
+                  )}
+                  {username && (
+                    <Link href={`/market/${username}`}>
+                      <TabsTrigger value="market" className="gap-2" data-testid="tab-market">
+                        <TrendingUp className="w-4 h-4" />
+                        Market
                       </TabsTrigger>
                     </Link>
                   )}
