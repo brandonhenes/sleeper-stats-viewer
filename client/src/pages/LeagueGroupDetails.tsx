@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/table";
 import type { Trade } from "@shared/schema";
 import { ScoutingSection } from "@/components/ScoutingSection";
+import { TeamsSection } from "@/components/TeamsSection";
+import { TradesSection } from "@/components/TradesSection";
 
 export default function LeagueGroupDetails() {
   const params = useParams<{ groupId: string; username?: string }>();
@@ -706,6 +708,12 @@ export default function LeagueGroupDetails() {
 
           {/* Scouting Section - Phase 1 Leaderboards */}
           <ScoutingSection leagueId={latestLeagueId} username={username} />
+
+          {/* Teams Section - Phase 2 */}
+          <TeamsSection leagueId={latestLeagueId} username={username} />
+
+          {/* Trade Assets Section - Phase 2 */}
+          <TradesSection leagueId={latestLeagueId} username={username} />
         </div>
       </div>
     </Layout>

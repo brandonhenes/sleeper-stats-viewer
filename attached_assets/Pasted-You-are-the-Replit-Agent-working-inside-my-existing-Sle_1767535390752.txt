@@ -1,0 +1,224 @@
+You are the Replit Agent working inside my existing Sleeper Scout / Sleeper for Daddy project. DO NOT rewrite the app. Make minimal, incremental changes. Preserve styling/theme. Use cached DB as source of truth; do not spam Sleeper.
+
+This prompt is Phase 2 only (values optional). Build the features below + incorporate the “gotchas” so the implementation is resilient.
+
+GOALS (Phase 2):
+1) League detail: show CURRENT roster for each team + CURRENT draft capital for each team.
+2) League detail: show ACTUAL trades for each team (human-readable assets).
+3) Global “Market/Trends”: how many times across all synced leagues a player or pick type is traded (current year + overall + by season trend).
+4) Upgrade Compare into a TRADE TARGETING tool:
+   - show opponent’s top exposure players by position across all active leagues
+   - intersect that with YOUR per-league rosters so you can identify “trade bait” they likely want in each league
+   - make this usable during trade talks.
+
+Respect existing Active vs History split:
+- Default all analytics to ACTIVE leagues only.
+- Provide toggle to include History (counts and rankings change accordingly).
+- “Current year” = leagues where league.season == current NFL season (or latest season across active groups).
+
+────────────────────────────────────────
+A) CURRENT ROSTERS FOR EACH TEAM (PER LEAGUE)
+────────────────────────────────────────
+Data:
+- /league/<league_id>/rosters for player_ids per roster
+- /league/<league_id>/users for owner display names
+- players_master for player_id -> name/pos/team mapping (DST ids handled)
+
+UI:
+- League Detail “Teams” view/table:
+  Team | Record | PF | PA | Roster (expand/collapse)
+- Roster list shows:
+  Player Name | Pos | NFL Team
+- Handle DST identifiers (team abbreviations) gracefully with a mapping (e.g., “DET DST”).
+
+Caching:
+- Cache rosters/users per league_id. Refresh on Sync or if stale.
+
+────────────────────────────────────────
+B) CURRENT DRAFT CAPITAL FOR EACH TEAM (PER LEAGUE)
+────────────────────────────────────────
+Data:
+- GET /league/<league_id>/traded_picks
+Logic:
+- Start from default: each roster owns its own picks
+- Apply traded_picks to move ownership
+Output per roster:
+- grid Year | R1 | R2 | R3 | R4 (support more rounds if present)
+- Totals + Pick Hoard Index = (#1sts + #2nds)
+
+UI:
+- In Teams table: Draft Capital (expand/collapse)
+- Add “Draft Capital Leaderboard” sortable by #1sts/#2nds/total/hoard index.
+
+DB:
+- draft_picks_ownership(league_id, season, roster_id, year, round, original_owner_roster_id, current_owner_roster_id, updated_at)
+
+────────────────────────────────────────
+C) ACTUAL TRADES DISPLAYED FOR EACH TEAM (PER LEAGUE + PER HISTORY GROUP)
+────────────────────────────────────────
+Problem: Trades have been blank; we need a normalized asset model and a readable log.
+
+Data:
+- Transactions endpoint per league_id: /league/<league_id>/transactions/<round>
+Rounds:
+- Fetch 0..22 (NO early stop). Concurrency cap.
+
+Normalize:
+- Create trade_transactions table if not already, plus trade_assets table.
+
+trade_assets schema:
+- trade_id (transaction_id)
+- league_id
+- season
+- created_at_ms
+- roster_id
+- counterparty_roster_ids_json (array; support 2+ teams)
+- asset_type ('player'|'pick')
+- asset_key (player_id OR canonical pick key)
+- direction ('sent'|'received')
+
+Canonical pick key (league-specific, stable):
+- pick:{league_id}:{year}:{round}:{original_owner_roster_id}
+If original owner not available, use the most stable fields provided and keep consistent.
+
+Trade parsing:
+- Players: derive sent/received from adds/drops mapping (player_id -> roster_id) or equivalent structure.
+- Picks: derive sent/received from draft_picks arrays in the trade transaction (ownership change).
+- Trades may involve 3+ rosters: store counterparty list.
+
+UI:
+- League detail “Trades” tab:
+  - filter by team/roster
+  - each trade renders as:
+    Date | Team A sent [assets] ↔ Team B sent [assets] (support 3-team formatting)
+  - assets show player names and pick labels: “2026 R1 (orig: TeamX)”
+- Per-team summary:
+  - trades this season
+  - trades overall (if History toggle enabled)
+  - top trade partners
+
+Diagnostics:
+- If no trades found, show:
+  “0 trades found (checked rounds 0–22 across X leagues/seasons in scope).”
+
+────────────────────────────────────────
+D) GLOBAL MARKET / TRENDS (ACROSS SYNCED LEAGUES)
+────────────────────────────────────────
+Add top-level tab “Market” (or “Trends”).
+
+Scope controls:
+- Active only (default) vs include History
+- Current year vs overall
+
+D1) Most traded PLAYERS
+Compute from trade_assets where asset_type='player':
+- current year count
+- overall count
+- season-by-season trend (season -> count)
+
+UI:
+- Table: Player | Pos | NFL Team | Trades (This Season) | Trades (Overall)
+- Click player -> modal/detail:
+  - breakdown by season
+  - list leagues where traded + sample trades
+
+D2) Most traded PICK TYPES (picks aren’t global assets)
+Compute “pick type”:
+- pick_type_key = {year}:{round}
+Count from trade_assets where asset_type='pick':
+- current year count
+- overall count
+- trend by season (season -> count)
+
+UI:
+- Table: Pick Type (e.g., 2026 R1) | Trades (This Season) | Trades (Overall)
+- Click -> list leagues + sample trades
+
+────────────────────────────────────────
+E) REPLACE/UPGRADE COMPARE TAB → TRADE TARGETING TOOL
+────────────────────────────────────────
+Current compare is not useful. Convert it into “Trade Targeting”:
+
+Inputs:
+- Username A (me) and Username B (opponent)
+- Optional: select a specific league (to apply only within one league), default: show across all shared active leagues.
+
+Core outputs:
+
+E1) Opponent Exposure by Position (Top 10)
+For Username B across ACTIVE leagues:
+- compute exposure by position:
+  QB top 10, RB top 10, WR top 10, TE top 10 (and FLEX if relevant)
+Each row:
+- Player | Pos | Exposure% | LeaguesOwnedCount
+Sort descending by exposure.
+
+E2) “Trade Bait” intersection per shared league
+For each league where BOTH users are participants (shared leagues):
+- Show:
+  - Opponent’s top exposure players (by pos) that YOU currently have on your roster IN THAT LEAGUE (or can access)
+  - This yields a list of “players they clearly like AND you have in this league.”
+
+UI layout suggestion:
+- A list of shared leagues (cards):
+  League Name
+  - “Top targets you have” (grouped by position)
+    e.g., WR: Cam Ward (B owns in 8/32 leagues) — you have him here
+  - a small badge showing opponent’s exposure% and your acquisition method if available (Draft/Trade/FA)
+
+E3) Optional: “What they have that you like”
+Do the same in reverse:
+- Your top exposure players by position
+- Intersect with what opponent has in that shared league
+This helps find 2-way trade frameworks.
+
+Data rules:
+- Exposure must use ACTIVE leagues by default (not history).
+- If user toggles History, show it clearly labeled.
+
+Acceptance:
+- Compare becomes actionable: it produces per-league “players you own that they like” lists.
+
+────────────────────────────────────────
+F) GOTCHAS / RESILIENCE REQUIREMENTS (MUST IMPLEMENT)
+────────────────────────────────────────
+1) Timestamps:
+- created_at may be missing/inconsistent. If missing, use (season + round/week) as time axis.
+- UI should display either date or “Week X” fallback.
+
+2) Multi-team trades:
+- Trades can involve 3+ teams. Data model must support counterparty_roster_ids as array and UI should not break.
+
+3) Week ranges:
+- Do not hardcode 18. Different leagues and seasons vary.
+- For transactions, we still fetch 0..22.
+- For matchups/strength metrics, stop at last week with real data (Phase 1 already), and don’t mix playoff weeks unless explicitly included.
+
+4) League scope confusion:
+- Always label scope: Active vs History, Current year vs Overall.
+- Default Market and Compare to Active + Current year summary, with clear toggles.
+
+5) Rate limiting:
+- Use DB caching; enforce concurrency limits.
+- Sync should show “last updated” timestamps and avoid re-fetch loops.
+
+6) Debug support:
+- Expand debug drawer (?debug=1) to include:
+  - trade_assets row count
+  - unique traded players count
+  - pick trades count
+  - scope counts (active leagues included, seasons included)
+  - compare results count per shared league (how many “trade bait” matches)
+
+────────────────────────────────────────
+PHASE 2 ACCEPTANCE TESTS
+────────────────────────────────────────
+1) League detail shows every team’s current roster (names resolved; DST handled).
+2) League detail shows every team’s current draft capital.
+3) Trades tab shows real trades per team with assets; no blank section.
+4) Market tab shows most traded players and pick types (current year + overall + season trends).
+5) Trade Targeting compare shows opponent top exposures by position AND per-shared-league “players you have that they like”.
+6) All features respect Active vs History toggles; defaults are Active-only.
+7) Debug drawer reflects new counts and doesn’t appear unless ?debug=1.
+
+Proceed implementing Phase 2 exactly as above, minimally and safely.

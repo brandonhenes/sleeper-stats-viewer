@@ -417,3 +417,110 @@ export function useScoutingTrading(leagueId: string | undefined) {
     staleTime: 1000 * 60 * 10,
   });
 }
+
+// ============================================================================
+// PHASE 2 HOOKS - Teams, Draft Capital (all), Trade Assets
+// ============================================================================
+
+// GET /api/league/:leagueId/teams - All teams with current rosters
+export function useLeagueTeams(leagueId: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "teams"],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/teams`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch teams");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+// GET /api/league/:leagueId/draft-capital/all - Draft capital for ALL teams
+export function useAllDraftCapital(leagueId: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "draft-capital/all"],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/draft-capital/all`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch draft capital");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+// GET /api/league/:leagueId/trade-assets - Normalized trade assets for a league
+export function useTradeAssets(leagueId: string | undefined, rosterId?: number) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "trade-assets", rosterId],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      let url = `/api/league/${encodeURIComponent(leagueId)}/trade-assets`;
+      if (rosterId !== undefined) {
+        url += `?roster_id=${rosterId}`;
+      }
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch trade assets");
+      }
+
+      return res.json() as Promise<{
+        league_id: string;
+        total_assets: number;
+        trades_count: number;
+        trades: Array<{
+          trade_id: string;
+          created_at_ms: number;
+          season: number;
+          participants: number[];
+          assets: Array<{
+            roster_id: number;
+            direction: string;
+            asset_type: string;
+            asset_key: string;
+            asset_name: string | null;
+          }>;
+        }>;
+      }>;
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+// POST /api/league/:leagueId/normalize-trades - Normalize trades for a league
+export function useNormalizeTrades() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async (leagueId: string) => {
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/normalize-trades`, {
+        method: "POST",
+      });
+      
+      if (!res.ok) {
+        throw new Error("Failed to normalize trades");
+      }
+      
+      return res.json() as Promise<{ success: boolean; assets_created: number }>;
+    },
+    onSuccess: (_, leagueId) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/league", leagueId, "trade-assets"] });
+    },
+  });
+}

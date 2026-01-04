@@ -2555,5 +2555,458 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================================================
+  // PHASE 2 ENDPOINTS - Teams, Draft Capital, Trade Assets, Market
+  // ============================================================================
+
+  // DST mapping for team abbreviations to display names
+  const DST_TEAMS: Record<string, string> = {
+    "ARI": "Cardinals", "ATL": "Falcons", "BAL": "Ravens", "BUF": "Bills",
+    "CAR": "Panthers", "CHI": "Bears", "CIN": "Bengals", "CLE": "Browns",
+    "DAL": "Cowboys", "DEN": "Broncos", "DET": "Lions", "GB": "Packers",
+    "HOU": "Texans", "IND": "Colts", "JAX": "Jaguars", "KC": "Chiefs",
+    "LAC": "Chargers", "LAR": "Rams", "LV": "Raiders", "MIA": "Dolphins",
+    "MIN": "Vikings", "NE": "Patriots", "NO": "Saints", "NYG": "Giants",
+    "NYJ": "Jets", "PHI": "Eagles", "PIT": "Steelers", "SEA": "Seahawks",
+    "SF": "49ers", "TB": "Buccaneers", "TEN": "Titans", "WAS": "Commanders",
+  };
+
+  // GET /api/league/:leagueId/teams - Returns all teams with rosters and draft capital
+  app.get("/api/league/:leagueId/teams", async (req, res) => {
+    const { leagueId } = req.params;
+
+    try {
+      // Get rosters, users, and roster players for this league
+      const rosters = await cache.getRostersForLeague(leagueId);
+      if (!rosters || rosters.length === 0) {
+        return res.status(404).json({ message: "League not found or has no rosters" });
+      }
+
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+
+      // Use the method that joins with rosters table to get roster_id
+      const rosterPlayers = await cache.getAllRosterPlayersWithRosterId(leagueId);
+      
+      // Gather all unique player IDs
+      const allPlayerIds = Array.from(new Set(rosterPlayers.map(rp => rp.player_id)));
+      const players = await cache.getPlayersByIds(allPlayerIds);
+      const playerMap = new Map(players.map(p => [p.player_id, p]));
+
+      // Build teams data
+      const teams = rosters.map(roster => {
+        const user = userMap.get(roster.owner_id || "");
+        // Filter by roster_id instead of owner_id to handle multi-roster owners correctly
+        const rosterPlayerIds = rosterPlayers
+          .filter(rp => rp.roster_id === roster.roster_id)
+          .map(rp => rp.player_id);
+
+        // Resolve player details
+        const playersResolved = rosterPlayerIds.map(pid => {
+          const player = playerMap.get(pid);
+          
+          // Handle DST identifiers - ONLY use the known DST_TEAMS lookup, no regex heuristics
+          if (!player && DST_TEAMS[pid]) {
+            return {
+              player_id: pid,
+              full_name: `${pid} DST`,
+              position: "DEF",
+              team: pid,
+            };
+          }
+          
+          // If no player found and not a known DST, mark as unknown
+          if (!player) {
+            return {
+              player_id: pid,
+              full_name: `Unknown (${pid})`,
+              position: null,
+              team: null,
+            };
+          }
+          
+          return {
+            player_id: pid,
+            full_name: player.full_name || `${player.first_name || ""} ${player.last_name || ""}`.trim() || pid,
+            position: player.position,
+            team: player.team,
+          };
+        });
+
+        // Sort by position order
+        const posOrder: Record<string, number> = { QB: 1, RB: 2, WR: 3, TE: 4, K: 5, DEF: 6 };
+        playersResolved.sort((a, b) => {
+          const aOrder = posOrder[a.position || ""] || 99;
+          const bOrder = posOrder[b.position || ""] || 99;
+          return aOrder - bOrder;
+        });
+
+        return {
+          roster_id: roster.roster_id,
+          owner_id: roster.owner_id,
+          display_name: user?.display_name || user?.team_name || `Team ${roster.roster_id}`,
+          team_name: user?.team_name || null,
+          record: {
+            wins: roster.wins,
+            losses: roster.losses,
+            ties: roster.ties,
+          },
+          points_for: roster.fpts,
+          points_against: roster.fpts_against,
+          players: playersResolved,
+          player_count: playersResolved.length,
+        };
+      });
+
+      // Sort by wins descending, then points_for
+      teams.sort((a, b) => {
+        if (b.record.wins !== a.record.wins) return b.record.wins - a.record.wins;
+        return (b.points_for || 0) - (a.points_for || 0);
+      });
+
+      res.json({
+        league_id: leagueId,
+        teams_count: teams.length,
+        teams,
+      });
+    } catch (e) {
+      console.error("Teams endpoint error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/draft-capital/all - Returns draft capital for ALL teams
+  app.get("/api/league/:leagueId/draft-capital/all", async (req, res) => {
+    const { leagueId } = req.params;
+
+    try {
+      const rosters = await cache.getRostersForLeague(leagueId);
+      if (!rosters || rosters.length === 0) {
+        return res.status(404).json({ message: "League not found or has no rosters" });
+      }
+
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+
+      // Get cached league to check season
+      const league = await cache.getLeagueById(leagueId);
+      const currentSeason = league?.season || new Date().getFullYear();
+
+      // Fetch traded_picks from Sleeper API (or use cached trades)
+      let tradedPicks: any[] = [];
+      try {
+        const resp = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/traded_picks`);
+        if (resp.ok) {
+          tradedPicks = await resp.json();
+        }
+      } catch (e) {
+        console.error("Error fetching traded_picks:", e);
+      }
+
+      // Initialize default ownership: each roster owns their own picks
+      // For years: current_season through current_season + 3 (4 years)
+      // For rounds: 1-4 (most common)
+      const years = [currentSeason, currentSeason + 1, currentSeason + 2, currentSeason + 3];
+      const rounds = [1, 2, 3, 4];
+
+      // Build ownership map: key = {year}:{round}:{original_owner_id} => current_owner_roster_id
+      const ownershipMap = new Map<string, number>();
+
+      // Default: each roster owns their own picks
+      for (const roster of rosters) {
+        for (const year of years) {
+          for (const round of rounds) {
+            const key = `${year}:${round}:${roster.roster_id}`;
+            ownershipMap.set(key, roster.roster_id);
+          }
+        }
+      }
+
+      // Apply traded picks to update ownership
+      for (const pick of tradedPicks) {
+        const key = `${pick.season}:${pick.round}:${pick.roster_id}`;
+        ownershipMap.set(key, pick.owner_id);
+      }
+
+      // Aggregate per roster: count picks by year and round
+      const rosterCapital = rosters.map(roster => {
+        const user = userMap.get(roster.owner_id || "");
+        
+        const byYear: Record<number, { r1: number; r2: number; r3: number; r4: number; total: number }> = {};
+        let totalR1 = 0, totalR2 = 0, totalR3 = 0, totalR4 = 0, grandTotal = 0;
+
+        for (const year of years) {
+          byYear[year] = { r1: 0, r2: 0, r3: 0, r4: 0, total: 0 };
+          
+          for (const round of rounds) {
+            // Count how many picks of this year/round this roster owns
+            let count = 0;
+            for (const origRoster of rosters) {
+              const key = `${year}:${round}:${origRoster.roster_id}`;
+              if (ownershipMap.get(key) === roster.roster_id) {
+                count++;
+              }
+            }
+            
+            if (round === 1) { byYear[year].r1 = count; totalR1 += count; }
+            else if (round === 2) { byYear[year].r2 = count; totalR2 += count; }
+            else if (round === 3) { byYear[year].r3 = count; totalR3 += count; }
+            else if (round === 4) { byYear[year].r4 = count; totalR4 += count; }
+            
+            byYear[year].total += count;
+            grandTotal += count;
+          }
+        }
+
+        // Pick Hoard Index = R1 + R2 (simplified from (R1*2 + R2))
+        const pickHoardIndex = totalR1 + totalR2;
+
+        return {
+          roster_id: roster.roster_id,
+          owner_id: roster.owner_id,
+          display_name: user?.display_name || user?.team_name || `Team ${roster.roster_id}`,
+          by_year: byYear,
+          totals: { r1: totalR1, r2: totalR2, r3: totalR3, r4: totalR4, total: grandTotal },
+          pick_hoard_index: pickHoardIndex,
+        };
+      });
+
+      // Sort by pick_hoard_index descending
+      rosterCapital.sort((a, b) => b.pick_hoard_index - a.pick_hoard_index);
+
+      res.json({
+        league_id: leagueId,
+        current_season: currentSeason,
+        years,
+        teams_count: rosters.length,
+        rosters: rosterCapital,
+      });
+    } catch (e) {
+      console.error("Draft capital all error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // Helper function to normalize trades into trade_assets table
+  async function normalizeTradesForLeague(leagueId: string): Promise<number> {
+    const trades = await cache.getTradesForLeague(leagueId);
+    if (!trades || trades.length === 0) return 0;
+
+    const league = await cache.getLeagueById(leagueId);
+    const season = league?.season || new Date().getFullYear();
+
+    // Get player names for display
+    const allPlayerIds = new Set<string>();
+    for (const trade of trades) {
+      if (trade.adds) {
+        const adds = JSON.parse(trade.adds) as Record<string, string>;
+        for (const playerId of Object.keys(adds)) {
+          allPlayerIds.add(playerId);
+        }
+      }
+      if (trade.drops) {
+        const drops = JSON.parse(trade.drops) as Record<string, string>;
+        for (const playerId of Object.keys(drops)) {
+          allPlayerIds.add(playerId);
+        }
+      }
+    }
+
+    const players = await cache.getPlayersByIds(Array.from(allPlayerIds));
+    const playerMap = new Map(players.map(p => [p.player_id, p.full_name || p.player_id]));
+
+    // Clear existing assets for this league before re-normalizing
+    await cache.clearTradeAssetsForLeague(leagueId);
+
+    const assets: Array<{
+      trade_id: string;
+      league_id: string;
+      season: number;
+      created_at_ms: number;
+      roster_id: number;
+      counterparty_roster_ids: string | null;
+      asset_type: string;
+      asset_key: string;
+      asset_name: string | null;
+      direction: string;
+    }> = [];
+
+    for (const trade of trades) {
+      const rosterIds = trade.roster_ids ? JSON.parse(trade.roster_ids) as number[] : [];
+      const adds = trade.adds ? JSON.parse(trade.adds) as Record<string, string> : {};
+      const drops = trade.drops ? JSON.parse(trade.drops) as Record<string, string> : {};
+      const draftPicks = trade.draft_picks ? JSON.parse(trade.draft_picks) as Array<{
+        season: string | number;
+        round: number;
+        roster_id: number;
+        previous_owner_id: number;
+        owner_id: number;
+      }> : [];
+
+      // Process adds: player_id -> roster_id that received them
+      for (const [playerId, rosterId] of Object.entries(adds)) {
+        const receiverRosterId = parseInt(rosterId, 10);
+        const counterparties = rosterIds.filter(r => r !== receiverRosterId);
+        
+        assets.push({
+          trade_id: trade.transaction_id,
+          league_id: leagueId,
+          season,
+          created_at_ms: trade.created_at,
+          roster_id: receiverRosterId,
+          counterparty_roster_ids: counterparties.length > 0 ? JSON.stringify(counterparties) : null,
+          asset_type: 'player',
+          asset_key: playerId,
+          asset_name: playerMap.get(playerId) || null,
+          direction: 'received',
+        });
+
+        // Also record as sent by counterparties
+        for (const senderId of counterparties) {
+          assets.push({
+            trade_id: trade.transaction_id,
+            league_id: leagueId,
+            season,
+            created_at_ms: trade.created_at,
+            roster_id: senderId,
+            counterparty_roster_ids: JSON.stringify([receiverRosterId]),
+            asset_type: 'player',
+            asset_key: playerId,
+            asset_name: playerMap.get(playerId) || null,
+            direction: 'sent',
+          });
+        }
+      }
+
+      // Process draft picks
+      for (const pick of draftPicks) {
+        const pickYear = typeof pick.season === 'string' ? parseInt(pick.season, 10) : pick.season;
+        const pickKey = `${pickYear}:${pick.round}:${pick.roster_id}`;
+        const pickName = `${pickYear} Round ${pick.round} (${pick.roster_id})`;
+
+        // Record as received by new owner
+        assets.push({
+          trade_id: trade.transaction_id,
+          league_id: leagueId,
+          season,
+          created_at_ms: trade.created_at,
+          roster_id: pick.owner_id,
+          counterparty_roster_ids: JSON.stringify([pick.previous_owner_id]),
+          asset_type: 'pick',
+          asset_key: pickKey,
+          asset_name: pickName,
+          direction: 'received',
+        });
+
+        // Record as sent by previous owner
+        assets.push({
+          trade_id: trade.transaction_id,
+          league_id: leagueId,
+          season,
+          created_at_ms: trade.created_at,
+          roster_id: pick.previous_owner_id,
+          counterparty_roster_ids: JSON.stringify([pick.owner_id]),
+          asset_type: 'pick',
+          asset_key: pickKey,
+          asset_name: pickName,
+          direction: 'sent',
+        });
+      }
+    }
+
+    // Upsert all assets
+    await cache.upsertTradeAssets(assets);
+    return assets.length;
+  }
+
+  // POST /api/league/:leagueId/normalize-trades - Normalize trades for a league
+  app.post("/api/league/:leagueId/normalize-trades", async (req, res) => {
+    const { leagueId } = req.params;
+
+    try {
+      const count = await normalizeTradesForLeague(leagueId);
+      res.json({ success: true, assets_created: count });
+    } catch (e) {
+      console.error("Normalize trades error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/trade-assets - Get normalized trade assets for a league
+  app.get("/api/league/:leagueId/trade-assets", async (req, res) => {
+    const { leagueId } = req.params;
+    const rosterId = req.query.roster_id ? parseInt(req.query.roster_id as string, 10) : undefined;
+
+    try {
+      let assets;
+      if (rosterId !== undefined) {
+        assets = await cache.getTradeAssetsForRoster(leagueId, rosterId);
+      } else {
+        assets = await cache.getTradeAssetsForLeague(leagueId);
+      }
+
+      // Group by trade_id for display
+      const byTrade = new Map<string, {
+        trade_id: string;
+        created_at_ms: number;
+        season: number;
+        participants: number[];
+        assets: Array<{
+          roster_id: number;
+          direction: string;
+          asset_type: string;
+          asset_key: string;
+          asset_name: string | null;
+        }>;
+      }>();
+
+      for (const asset of assets) {
+        if (!byTrade.has(asset.trade_id)) {
+          byTrade.set(asset.trade_id, {
+            trade_id: asset.trade_id,
+            created_at_ms: asset.created_at_ms,
+            season: asset.season,
+            participants: [],
+            assets: [],
+          });
+        }
+        const group = byTrade.get(asset.trade_id)!;
+        if (!group.participants.includes(asset.roster_id)) {
+          group.participants.push(asset.roster_id);
+        }
+        group.assets.push({
+          roster_id: asset.roster_id,
+          direction: asset.direction,
+          asset_type: asset.asset_type,
+          asset_key: asset.asset_key,
+          asset_name: asset.asset_name,
+        });
+      }
+
+      const grouped = Array.from(byTrade.values()).sort((a, b) => b.created_at_ms - a.created_at_ms);
+
+      res.json({
+        league_id: leagueId,
+        total_assets: assets.length,
+        trades_count: grouped.length,
+        trades: grouped,
+      });
+    } catch (e) {
+      console.error("Trade assets error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/trade-assets/stats - Get global trade asset statistics
+  app.get("/api/trade-assets/stats", async (req, res) => {
+    try {
+      const counts = await cache.getTradeAssetCounts();
+      res.json(counts);
+    } catch (e) {
+      console.error("Trade assets stats error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
   return httpServer;
 }

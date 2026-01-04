@@ -109,6 +109,19 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 4, 2026 (Phase 2 - Teams, Draft Capital, Trade Assets)
+- **Phase 2 Backend**: Created new endpoints for league-wide scouting
+  - `GET /api/league/:leagueId/teams` - Returns all teams with current rosters, player details, position badges
+  - `GET /api/league/:leagueId/draft-capital/all` - Returns draft capital for ALL teams with Year/Round grid and Pick Hoard Index
+  - `POST /api/league/:leagueId/normalize-trades` - Normalizes trade data into trade_assets table
+  - `GET /api/league/:leagueId/trade-assets` - Returns normalized trade assets with sent/received direction
+- **Trade Assets Schema**: Created trade_assets table with unique constraint (trade_id, roster_id, asset_key, direction) for deduplication
+- **Phase 2 Frontend**: 
+  - TeamsSection component with expandable rosters and toggle between roster view and draft capital view
+  - TradesSection component showing trades with human-readable player names and picks, organized by trade with sent/received columns
+  - useLeagueTeams, useAllDraftCapital, useTradeAssets, useNormalizeTrades hooks
+- **Integration**: TeamsSection and TradesSection added to LeagueGroupDetails page
+
 ### January 4, 2026 (Phase 1 Scouting Leaderboards)
 - **Phase 1 Backend Complete**: Created 5 new scouting leaderboard endpoints that return data for ALL rosters in a league (not just current user)
   - `/api/league/:leagueId/scouting/draft-capital` - Pick Hoard Index = (R1 x 2) + R2, sorted by total picks

@@ -1,5 +1,5 @@
 import { pool } from "./db";
-import { eq, and, sql, desc, ilike, max } from "drizzle-orm";
+import { eq, and, sql, desc, ilike, max, inArray } from "drizzle-orm";
 import { db } from "./db";
 import * as schema from "@shared/schema";
 
@@ -80,6 +80,21 @@ export interface CachedTrade {
   drops: string | null;
   draft_picks: string | null;
   waiver_budget: string | null;
+  updated_at: number;
+}
+
+export interface TradeAsset {
+  id: number;
+  trade_id: string;
+  league_id: string;
+  season: number;
+  created_at_ms: number;
+  roster_id: number;
+  counterparty_roster_ids: string | null;
+  asset_type: string;
+  asset_key: string;
+  asset_name: string | null;
+  direction: string;
   updated_at: number;
 }
 
@@ -609,6 +624,123 @@ export const cache = {
       .from(schema.roster_players)
       .where(and(eq(schema.roster_players.league_id, leagueId), eq(schema.roster_players.owner_id, ownerId)));
     return result;
+  },
+
+  async getAllRosterPlayersForLeague(leagueId: string): Promise<{ owner_id: string; player_id: string }[]> {
+    const result = await db.select({ 
+      owner_id: schema.roster_players.owner_id,
+      player_id: schema.roster_players.player_id 
+    })
+      .from(schema.roster_players)
+      .where(eq(schema.roster_players.league_id, leagueId));
+    return result;
+  },
+
+  async getAllRosterPlayersWithRosterId(leagueId: string): Promise<{ roster_id: number; owner_id: string; player_id: string }[]> {
+    const result = await db.select({ 
+      roster_id: schema.rosters.roster_id,
+      owner_id: schema.roster_players.owner_id,
+      player_id: schema.roster_players.player_id 
+    })
+      .from(schema.roster_players)
+      .innerJoin(
+        schema.rosters,
+        and(
+          eq(schema.roster_players.league_id, schema.rosters.league_id),
+          eq(schema.roster_players.owner_id, schema.rosters.owner_id)
+        )
+      )
+      .where(eq(schema.roster_players.league_id, leagueId));
+    return result;
+  },
+
+  async getPlayersByIds(playerIds: string[]): Promise<CachedPlayer[]> {
+    if (playerIds.length === 0) return [];
+    const result = await db.select().from(schema.players_master)
+      .where(inArray(schema.players_master.player_id, playerIds));
+    return result as CachedPlayer[];
+  },
+
+  // Trade Assets methods
+  async upsertTradeAssets(assets: Array<{
+    trade_id: string;
+    league_id: string;
+    season: number;
+    created_at_ms: number;
+    roster_id: number;
+    counterparty_roster_ids: string | null;
+    asset_type: string;
+    asset_key: string;
+    asset_name: string | null;
+    direction: string;
+  }>): Promise<void> {
+    if (assets.length === 0) return;
+    const now = Date.now();
+    
+    for (const asset of assets) {
+      await db.insert(schema.trade_assets)
+        .values({
+          trade_id: asset.trade_id,
+          league_id: asset.league_id,
+          season: asset.season,
+          created_at_ms: asset.created_at_ms,
+          roster_id: asset.roster_id,
+          counterparty_roster_ids: asset.counterparty_roster_ids,
+          asset_type: asset.asset_type,
+          asset_key: asset.asset_key,
+          asset_name: asset.asset_name,
+          direction: asset.direction,
+          updated_at: now,
+        })
+        .onConflictDoUpdate({
+          target: [schema.trade_assets.trade_id, schema.trade_assets.roster_id, schema.trade_assets.asset_key, schema.trade_assets.direction],
+          set: {
+            asset_name: sql`EXCLUDED.asset_name`,
+            counterparty_roster_ids: sql`EXCLUDED.counterparty_roster_ids`,
+            updated_at: sql`EXCLUDED.updated_at`,
+          },
+        });
+    }
+  },
+
+  async getTradeAssetsForLeague(leagueId: string): Promise<TradeAsset[]> {
+    const result = await db.select().from(schema.trade_assets)
+      .where(eq(schema.trade_assets.league_id, leagueId))
+      .orderBy(desc(schema.trade_assets.created_at_ms));
+    return result as TradeAsset[];
+  },
+
+  async getTradeAssetsForRoster(leagueId: string, rosterId: number): Promise<TradeAsset[]> {
+    const result = await db.select().from(schema.trade_assets)
+      .where(and(
+        eq(schema.trade_assets.league_id, leagueId),
+        eq(schema.trade_assets.roster_id, rosterId)
+      ))
+      .orderBy(desc(schema.trade_assets.created_at_ms));
+    return result as TradeAsset[];
+  },
+
+  async getAllTradeAssets(): Promise<TradeAsset[]> {
+    const result = await db.select().from(schema.trade_assets)
+      .orderBy(desc(schema.trade_assets.created_at_ms));
+    return result as TradeAsset[];
+  },
+
+  async getTradeAssetCounts(): Promise<{ total: number; players: number; picks: number }> {
+    const total = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets);
+    const players = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
+      .where(eq(schema.trade_assets.asset_type, 'player'));
+    const picks = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
+      .where(eq(schema.trade_assets.asset_type, 'pick'));
+    return {
+      total: Number(total[0]?.count) || 0,
+      players: Number(players[0]?.count) || 0,
+      picks: Number(picks[0]?.count) || 0,
+    };
+  },
+
+  async clearTradeAssetsForLeague(leagueId: string): Promise<void> {
+    await db.delete(schema.trade_assets).where(eq(schema.trade_assets.league_id, leagueId));
   },
 };
 

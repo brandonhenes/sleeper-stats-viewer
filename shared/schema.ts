@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, jsonb, real, primaryKey, bigint, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, jsonb, real, primaryKey, bigint, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -120,6 +120,27 @@ export const trades = pgTable("trades", {
   updated_at: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => [
   index("idx_trades_league").on(table.league_id),
+]);
+
+export const trade_assets = pgTable("trade_assets", {
+  id: serial("id").primaryKey(),
+  trade_id: text("trade_id").notNull(),
+  league_id: text("league_id").notNull(),
+  season: integer("season").notNull(),
+  created_at_ms: bigint("created_at_ms", { mode: "number" }).notNull(),
+  roster_id: integer("roster_id").notNull(),
+  counterparty_roster_ids: text("counterparty_roster_ids"),
+  asset_type: text("asset_type").notNull(),
+  asset_key: text("asset_key").notNull(),
+  asset_name: text("asset_name"),
+  direction: text("direction").notNull(),
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_trade_assets_trade").on(table.trade_id),
+  index("idx_trade_assets_league").on(table.league_id),
+  index("idx_trade_assets_roster").on(table.roster_id),
+  index("idx_trade_assets_asset").on(table.asset_type, table.asset_key),
+  uniqueIndex("idx_trade_assets_unique").on(table.trade_id, table.roster_id, table.asset_key, table.direction),
 ]);
 
 export const players_master = pgTable("players_master", {
