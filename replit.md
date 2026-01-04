@@ -109,6 +109,18 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 4, 2026 (Phase 1 Scouting Leaderboards)
+- **Phase 1 Backend Complete**: Created 5 new scouting leaderboard endpoints that return data for ALL rosters in a league (not just current user)
+  - `/api/league/:leagueId/scouting/draft-capital` - Pick Hoard Index = (R1 x 2) + R2, sorted by total picks
+  - `/api/league/:leagueId/scouting/strength` - All-Play win rate, actual vs expected wins, Luck Index
+  - `/api/league/:leagueId/scouting/consistency` - Avg points, std dev, best/worst weeks, consistency score
+  - `/api/league/:leagueId/scouting/churn` - Adds, drops, moves/week with timeframe filter (season/last30/lifetime)
+  - `/api/league/:leagueId/scouting/trading` - Trade counts, timing breakdown, Aggression Index, trading style
+- **Phase 1 Frontend Hooks**: Added useScoutingDraftCapital, useScoutingStrength, useScoutingConsistency, useScoutingChurn, useScoutingTrading
+- **ScoutingSection Component**: New tabbed interface with 5 metrics, leaderboard tables for all rosters, current user highlighting, scope labels, timeframe selector for churn
+- **Integration**: ScoutingSection added to LeagueGroupDetails page after Trade History section
+- **Type Fixes**: Removed avatar field from churn/trading types (cache LeagueUser doesn't have this field)
+
 ### January 3, 2026 (Phase 0 Complete)
 - **Active/History Toggle**: Profile page now shows toggle to filter between active leagues (current season with roster) vs historical leagues
 - **Roster Activity Timeframe**: Churn stats card includes selector for "This Season", "Last 30 Days", or "Lifetime" transaction filtering

@@ -313,3 +313,107 @@ export function useAllPlay(leagueId: string | undefined, username: string | unde
     staleTime: 1000 * 60 * 10, // Cache for 10 min (expensive API calls)
   });
 }
+
+// ============================================================================
+// PHASE 1 SCOUTING HOOKS - All-rosters leaderboard data
+// ============================================================================
+
+// GET /api/league/:leagueId/scouting/draft-capital - Draft capital for all rosters
+export function useScoutingDraftCapital(leagueId: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "scouting/draft-capital"],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/scouting/draft-capital`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch draft capital");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+// GET /api/league/:leagueId/scouting/strength - All-Play + Luck Index for all rosters
+export function useScoutingStrength(leagueId: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "scouting/strength"],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/scouting/strength`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch strength data");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+// GET /api/league/:leagueId/scouting/consistency - Consistency + Boom/Bust for all rosters
+export function useScoutingConsistency(leagueId: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "scouting/consistency"],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/scouting/consistency`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch consistency data");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+// GET /api/league/:leagueId/scouting/churn?timeframe=... - Churn rate for all rosters
+export function useScoutingChurn(leagueId: string | undefined, timeframe: string = "season") {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "scouting/churn", timeframe],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/scouting/churn?timeframe=${encodeURIComponent(timeframe)}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch churn data");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+// GET /api/league/:leagueId/scouting/trading - Trade propensity for all rosters
+export function useScoutingTrading(leagueId: string | undefined) {
+  return useQuery({
+    queryKey: ["/api/league", leagueId, "scouting/trading"],
+    queryFn: async () => {
+      if (!leagueId) return null;
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/scouting/trading`);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch trading data");
+      }
+
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 10,
+  });
+}

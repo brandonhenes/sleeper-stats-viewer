@@ -561,7 +561,9 @@ export async function registerRoutes(
         group_found: true,
         group_id: groupId,
         group_name: group.name || "Unknown",
-        seasons: group.seasons || [],
+        min_season: group.min_season,
+        max_season: group.max_season,
+        seasons_count: group.seasons_count,
         league_ids: group.league_ids || [],
         latest_league_id: latestLeagueId || null,
         is_active: group.is_active ?? false,
@@ -570,8 +572,8 @@ export async function registerRoutes(
         user_in_latest_league: !!userRoster,
         roster_count: rosters.length,
         group_trades_count: groupTradesCount,
-        total_wins: group.total_wins ?? 0,
-        total_losses: group.total_losses ?? 0,
+        total_wins: group.overall_record?.wins ?? 0,
+        total_losses: group.overall_record?.losses ?? 0,
         current_nfl_season: getCurrentNFLSeason(),
       });
     } catch (e) {
@@ -1875,6 +1877,680 @@ export async function registerRoutes(
       });
     } catch (e) {
       console.error("All-play error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // ============================================================================
+  // PHASE 1 SCOUTING ENDPOINTS - All-rosters leaderboards
+  // ============================================================================
+
+  // GET /api/league/:leagueId/scouting/draft-capital
+  // Returns draft capital for ALL rosters in the league with Pick Hoard Index
+  app.get("/api/league/:leagueId/scouting/draft-capital", async (req, res) => {
+    const { leagueId } = req.params;
+
+    try {
+      const rosters = await cache.getRostersForLeague(leagueId);
+      if (!rosters || rosters.length === 0) {
+        return res.status(404).json({ message: "League not found or has no rosters" });
+      }
+
+      // Get league users for display names
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+
+      // Fetch traded picks from Sleeper API
+      const tradedPicks = await getTradedPicks(leagueId) as Array<{
+        season: string;
+        round: number;
+        roster_id: number;
+        previous_owner_id: number;
+        owner_id: number;
+      }> | null;
+
+      // Extract unique years from traded picks data
+      const yearsFromData = new Set<string>();
+      if (tradedPicks && Array.isArray(tradedPicks)) {
+        for (const pick of tradedPicks) {
+          yearsFromData.add(pick.season);
+        }
+      }
+      const years = Array.from(yearsFromData).sort();
+      const rounds = [1, 2, 3, 4];
+
+      // Calculate draft capital for each roster
+      const rosterCapital: Array<{
+        roster_id: number;
+        owner_id: string | null;
+        display_name: string;
+        picks_by_year: Record<string, Record<number, number>>;
+        totals: { r1: number; r2: number; r3: number; r4: number; total: number };
+        pick_hoard_index: number;
+        acquired_count: number;
+        traded_away_count: number;
+      }> = [];
+
+      for (const roster of rosters) {
+        const rosterId = roster.roster_id;
+        const user = userMap.get(roster.owner_id || "");
+
+        // Track picks for this roster
+        const acquiredPicks: Array<{ year: string; round: number }> = [];
+        const tradedAwayPicks: Array<{ year: string; round: number }> = [];
+
+        if (tradedPicks && Array.isArray(tradedPicks)) {
+          for (const pick of tradedPicks) {
+            // Acquired: user is owner but not the original roster
+            if (pick.owner_id === rosterId && pick.roster_id !== rosterId) {
+              acquiredPicks.push({ year: pick.season, round: pick.round });
+            }
+            // Traded away: user was previous owner but no longer owns
+            if (pick.previous_owner_id === rosterId && pick.owner_id !== rosterId) {
+              tradedAwayPicks.push({ year: pick.season, round: pick.round });
+            }
+          }
+        }
+
+        // Calculate owned picks by year/round
+        const ownedPicks: Record<string, Record<number, number>> = {};
+        for (const year of years) {
+          ownedPicks[year] = {};
+          for (const round of rounds) {
+            ownedPicks[year][round] = 1; // Start with own pick
+          }
+        }
+
+        for (const pick of acquiredPicks) {
+          if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
+            ownedPicks[pick.year][pick.round]++;
+          }
+        }
+        for (const pick of tradedAwayPicks) {
+          if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
+            ownedPicks[pick.year][pick.round]--;
+          }
+        }
+
+        // Calculate totals
+        let totalR1 = 0, totalR2 = 0, totalR3 = 0, totalR4 = 0;
+        for (const year of years) {
+          totalR1 += Math.max(0, ownedPicks[year][1] || 0);
+          totalR2 += Math.max(0, ownedPicks[year][2] || 0);
+          totalR3 += Math.max(0, ownedPicks[year][3] || 0);
+          totalR4 += Math.max(0, ownedPicks[year][4] || 0);
+        }
+        const totalPicks = totalR1 + totalR2 + totalR3 + totalR4;
+        const pickHoardIndex = totalR1 * 2 + totalR2;
+
+        rosterCapital.push({
+          roster_id: rosterId,
+          owner_id: roster.owner_id,
+          display_name: user?.display_name || `Team ${rosterId}`,
+          picks_by_year: ownedPicks,
+          totals: { r1: totalR1, r2: totalR2, r3: totalR3, r4: totalR4, total: totalPicks },
+          pick_hoard_index: pickHoardIndex,
+          acquired_count: acquiredPicks.length,
+          traded_away_count: tradedAwayPicks.length,
+        });
+      }
+
+      // Sort by pick hoard index descending
+      rosterCapital.sort((a, b) => b.pick_hoard_index - a.pick_hoard_index);
+
+      res.json({
+        league_id: leagueId,
+        years,
+        rounds,
+        rosters: rosterCapital,
+        scope: "snapshot",
+        scope_label: "Latest League Only",
+      });
+    } catch (e) {
+      console.error("Scouting draft capital error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/scouting/strength
+  // Returns All-Play + Luck Index for ALL rosters (Strength leaderboard)
+  app.get("/api/league/:leagueId/scouting/strength", async (req, res) => {
+    const { leagueId } = req.params;
+
+    try {
+      const rosters = await cache.getRostersForLeague(leagueId);
+      if (!rosters || rosters.length === 0) {
+        return res.status(404).json({ message: "League not found or has no rosters" });
+      }
+
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+      const leagueSize = rosters.length;
+
+      // Collect matchup data for all weeks
+      const weeklyData: Map<number, Array<{ roster_id: number; points: number; matchup_id: number }>> = new Map();
+      let weeksPlayed = 0;
+
+      for (let week = 1; week <= 18; week++) {
+        const matchups = await getMatchups(leagueId, week) as Array<{
+          roster_id: number;
+          points: number;
+          matchup_id: number;
+        }> | null;
+
+        if (!matchups || matchups.length === 0) continue;
+        
+        // Check if any real scores exist
+        const hasScores = matchups.some(m => m.points !== undefined && m.points > 0);
+        if (!hasScores) continue;
+
+        weeklyData.set(week, matchups);
+        weeksPlayed++;
+      }
+
+      // Calculate strength metrics for each roster
+      const rosterStrength: Array<{
+        roster_id: number;
+        owner_id: string | null;
+        display_name: string;
+        actual: { wins: number; losses: number; ties: number; games: number; win_rate: number };
+        all_play: { wins: number; losses: number; ties: number; games: number; win_rate: number };
+        points_for: number;
+        points_against: number;
+        expected_wins: number;
+        luck_diff: number;
+        luck_index: number;
+        luck_label: string;
+      }> = [];
+
+      for (const roster of rosters) {
+        const rosterId = roster.roster_id;
+        const user = userMap.get(roster.owner_id || "");
+
+        let allPlayWins = 0, allPlayLosses = 0, allPlayTies = 0;
+        let actualWins = 0, actualLosses = 0, actualTies = 0;
+        let pointsFor = 0, pointsAgainst = 0;
+
+        for (const [_, matchups] of Array.from(weeklyData.entries())) {
+          const userMatchup = matchups.find(m => m.roster_id === rosterId);
+          if (!userMatchup || userMatchup.points === undefined) continue;
+
+          const userScore = userMatchup.points;
+          const userMatchupId = userMatchup.matchup_id;
+          pointsFor += userScore;
+
+          // Find actual opponent
+          const actualOpponent = matchups.find(
+            m => m.matchup_id === userMatchupId && m.roster_id !== rosterId
+          );
+          
+          if (actualOpponent && actualOpponent.points !== undefined) {
+            pointsAgainst += actualOpponent.points;
+            if (userScore > actualOpponent.points) actualWins++;
+            else if (userScore < actualOpponent.points) actualLosses++;
+            else actualTies++;
+          }
+
+          // All-play vs everyone
+          for (const opp of matchups) {
+            if (opp.roster_id === rosterId) continue;
+            if (opp.points === undefined) continue;
+
+            if (userScore > opp.points) allPlayWins++;
+            else if (userScore < opp.points) allPlayLosses++;
+            else allPlayTies++;
+          }
+        }
+
+        const totalAllPlayGames = allPlayWins + allPlayLosses + allPlayTies;
+        const totalActualGames = actualWins + actualLosses + actualTies;
+        
+        const allPlayWinRate = totalAllPlayGames > 0 
+          ? (allPlayWins + allPlayTies * 0.5) / totalAllPlayGames 
+          : 0;
+        const actualWinRate = totalActualGames > 0 
+          ? (actualWins + actualTies * 0.5) / totalActualGames 
+          : 0;
+        
+        const luckIndex = Math.round((actualWinRate - allPlayWinRate) * 100);
+        const expectedWins = allPlayWinRate * totalActualGames;
+        const luckDiff = actualWins - expectedWins;
+
+        let luckLabel = "neutral";
+        if (luckIndex > 10) luckLabel = "lucky";
+        else if (luckIndex > 5) luckLabel = "slightly_lucky";
+        else if (luckIndex < -10) luckLabel = "unlucky";
+        else if (luckIndex < -5) luckLabel = "slightly_unlucky";
+
+        rosterStrength.push({
+          roster_id: rosterId,
+          owner_id: roster.owner_id,
+          display_name: user?.display_name || `Team ${rosterId}`,
+          actual: {
+            wins: actualWins,
+            losses: actualLosses,
+            ties: actualTies,
+            games: totalActualGames,
+            win_rate: Math.round(actualWinRate * 100),
+          },
+          all_play: {
+            wins: allPlayWins,
+            losses: allPlayLosses,
+            ties: allPlayTies,
+            games: totalAllPlayGames,
+            win_rate: Math.round(allPlayWinRate * 100),
+          },
+          points_for: Math.round(pointsFor * 10) / 10,
+          points_against: Math.round(pointsAgainst * 10) / 10,
+          expected_wins: Math.round(expectedWins * 10) / 10,
+          luck_diff: Math.round(luckDiff * 10) / 10,
+          luck_index: luckIndex,
+          luck_label: luckLabel,
+        });
+      }
+
+      // Sort by all-play win rate descending (true strength)
+      rosterStrength.sort((a, b) => b.all_play.win_rate - a.all_play.win_rate);
+
+      res.json({
+        league_id: leagueId,
+        weeks_played: weeksPlayed,
+        teams: leagueSize,
+        rosters: rosterStrength,
+        scope: "snapshot",
+        scope_label: "Latest League Only",
+      });
+    } catch (e) {
+      console.error("Scouting strength error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/scouting/consistency
+  // Returns Consistency + Boom/Bust profile for ALL rosters
+  app.get("/api/league/:leagueId/scouting/consistency", async (req, res) => {
+    const { leagueId } = req.params;
+
+    try {
+      const rosters = await cache.getRostersForLeague(leagueId);
+      if (!rosters || rosters.length === 0) {
+        return res.status(404).json({ message: "League not found or has no rosters" });
+      }
+
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+
+      // Collect weekly scores for all rosters
+      const rosterScores: Map<number, number[]> = new Map();
+      const weeklyMedians: number[] = [];
+      let weeksPlayed = 0;
+
+      for (const roster of rosters) {
+        rosterScores.set(roster.roster_id, []);
+      }
+
+      for (let week = 1; week <= 18; week++) {
+        const matchups = await getMatchups(leagueId, week) as Array<{
+          roster_id: number;
+          points: number;
+        }> | null;
+
+        if (!matchups || matchups.length === 0) continue;
+        
+        const weekScores: number[] = [];
+        let hasScores = false;
+        
+        for (const m of matchups) {
+          if (m.points !== undefined && m.points > 0) {
+            hasScores = true;
+            weekScores.push(m.points);
+            const scores = rosterScores.get(m.roster_id);
+            if (scores) scores.push(m.points);
+          }
+        }
+
+        if (!hasScores) continue;
+        weeksPlayed++;
+
+        // Calculate median for this week
+        weekScores.sort((a, b) => a - b);
+        const mid = Math.floor(weekScores.length / 2);
+        const median = weekScores.length % 2 === 0
+          ? (weekScores[mid - 1] + weekScores[mid]) / 2
+          : weekScores[mid];
+        weeklyMedians.push(median);
+      }
+
+      // Calculate consistency metrics for each roster
+      const rosterConsistency: Array<{
+        roster_id: number;
+        owner_id: string | null;
+        display_name: string;
+        weeks_played: number;
+        avg_points: number;
+        std_dev: number;
+        best_week: number;
+        worst_week: number;
+        weeks_above_median: number;
+        median_beat_pct: number;
+        consistency_score: number;
+      }> = [];
+
+      for (const roster of rosters) {
+        const scores = rosterScores.get(roster.roster_id) || [];
+        const user = userMap.get(roster.owner_id || "");
+
+        if (scores.length === 0) {
+          rosterConsistency.push({
+            roster_id: roster.roster_id,
+            owner_id: roster.owner_id,
+            display_name: user?.display_name || `Team ${roster.roster_id}`,
+            weeks_played: 0,
+            avg_points: 0,
+            std_dev: 0,
+            best_week: 0,
+            worst_week: 0,
+            weeks_above_median: 0,
+            median_beat_pct: 0,
+            consistency_score: 0,
+          });
+          continue;
+        }
+
+        const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+        const variance = scores.reduce((sum, s) => sum + Math.pow(s - avg, 2), 0) / scores.length;
+        const stdDev = Math.sqrt(variance);
+        const bestWeek = Math.max(...scores);
+        const worstWeek = Math.min(...scores);
+
+        // Count weeks above median
+        let weeksAboveMedian = 0;
+        for (let i = 0; i < scores.length && i < weeklyMedians.length; i++) {
+          if (scores[i] > weeklyMedians[i]) weeksAboveMedian++;
+        }
+        const medianBeatPct = scores.length > 0 ? Math.round((weeksAboveMedian / scores.length) * 100) : 0;
+
+        // Consistency score: lower std dev relative to avg = more consistent
+        // Score = 100 - (stdDev/avg * 100), capped at 0-100
+        const consistencyScore = avg > 0 
+          ? Math.max(0, Math.min(100, Math.round(100 - (stdDev / avg * 100))))
+          : 0;
+
+        rosterConsistency.push({
+          roster_id: roster.roster_id,
+          owner_id: roster.owner_id,
+          display_name: user?.display_name || `Team ${roster.roster_id}`,
+          weeks_played: scores.length,
+          avg_points: Math.round(avg * 10) / 10,
+          std_dev: Math.round(stdDev * 10) / 10,
+          best_week: Math.round(bestWeek * 10) / 10,
+          worst_week: Math.round(worstWeek * 10) / 10,
+          weeks_above_median: weeksAboveMedian,
+          median_beat_pct: medianBeatPct,
+          consistency_score: consistencyScore,
+        });
+      }
+
+      // Sort by consistency score descending
+      rosterConsistency.sort((a, b) => b.consistency_score - a.consistency_score);
+
+      res.json({
+        league_id: leagueId,
+        weeks_analyzed: weeksPlayed,
+        teams: rosters.length,
+        rosters: rosterConsistency,
+        scope: "snapshot",
+        scope_label: "Latest League Only",
+      });
+    } catch (e) {
+      console.error("Scouting consistency error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/scouting/churn?timeframe=<season|last30|lifetime>
+  // Returns Churn Rate for ALL rosters with explicit timeframe
+  app.get("/api/league/:leagueId/scouting/churn", async (req, res) => {
+    const { leagueId } = req.params;
+    const timeframe = (req.query.timeframe as string) || "season";
+
+    try {
+      const rosters = await cache.getRostersForLeague(leagueId);
+      if (!rosters || rosters.length === 0) {
+        return res.status(404).json({ message: "League not found or has no rosters" });
+      }
+
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+
+      // Get all transactions for this league
+      let leagueTxns = await cache.getTradesForLeague(leagueId);
+
+      // Apply timeframe filter
+      if (timeframe === "last30") {
+        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        leagueTxns = leagueTxns.filter(t => t.created_at >= thirtyDaysAgo);
+      }
+
+      // Calculate churn for each roster
+      const rosterChurn: Array<{
+        roster_id: number;
+        owner_id: string | null;
+        display_name: string;
+        adds: number;
+        drops: number;
+        total_moves: number;
+        moves_per_week: number;
+        activity_level: string;
+      }> = [];
+
+      const estimatedWeeks = timeframe === "last30" ? 4 : 18;
+
+      for (const roster of rosters) {
+        const rosterId = roster.roster_id;
+        const user = userMap.get(roster.owner_id || "");
+
+        let addsCount = 0;
+        let dropsCount = 0;
+
+        for (const txn of leagueTxns) {
+          let rosterIds: number[] = [];
+          try { rosterIds = txn.roster_ids ? JSON.parse(txn.roster_ids) : []; } catch {}
+          if (!rosterIds.includes(rosterId)) continue;
+
+          if (txn.status === "complete") {
+            try {
+              const adds = JSON.parse(txn.adds || "{}") as Record<string, number>;
+              for (const [_, rid] of Object.entries(adds)) {
+                if (rid === rosterId) addsCount++;
+              }
+            } catch {}
+
+            try {
+              const drops = JSON.parse(txn.drops || "{}") as Record<string, number>;
+              for (const [_, rid] of Object.entries(drops)) {
+                if (rid === rosterId) dropsCount++;
+              }
+            } catch {}
+          }
+        }
+
+        const totalMoves = addsCount + dropsCount;
+        const movesPerWeek = Math.round((totalMoves / estimatedWeeks) * 10) / 10;
+
+        rosterChurn.push({
+          roster_id: rosterId,
+          owner_id: roster.owner_id,
+          display_name: user?.display_name || `Team ${rosterId}`,
+          adds: addsCount,
+          drops: dropsCount,
+          total_moves: totalMoves,
+          moves_per_week: movesPerWeek,
+          activity_level: "", // Will set after sorting
+        });
+      }
+
+      // Sort by total moves descending
+      rosterChurn.sort((a, b) => b.total_moves - a.total_moves);
+
+      // Calculate league average for activity labels
+      const avgMoves = rosterChurn.reduce((s, r) => s + r.total_moves, 0) / rosterChurn.length;
+
+      // Assign activity levels and ranks
+      for (let i = 0; i < rosterChurn.length; i++) {
+        const r = rosterChurn[i];
+        r.activity_level = r.total_moves > avgMoves * 1.5 ? "very_active" :
+          r.total_moves > avgMoves ? "active" :
+          r.total_moves > avgMoves * 0.5 ? "moderate" : "inactive";
+      }
+
+      const timeframeLabel = timeframe === "last30" ? "Last 30 Days" :
+        timeframe === "lifetime" ? "All Time" : "This Season";
+
+      res.json({
+        league_id: leagueId,
+        timeframe,
+        timeframe_label: timeframeLabel,
+        teams: rosters.length,
+        league_avg_moves: Math.round(avgMoves * 10) / 10,
+        rosters: rosterChurn,
+        scope: "snapshot",
+        scope_label: "Latest League Only",
+      });
+    } catch (e) {
+      console.error("Scouting churn error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/scouting/trading
+  // Returns Trade Propensity + Timing for ALL rosters
+  app.get("/api/league/:leagueId/scouting/trading", async (req, res) => {
+    const { leagueId } = req.params;
+
+    try {
+      const rosters = await cache.getRostersForLeague(leagueId);
+      if (!rosters || rosters.length === 0) {
+        return res.status(404).json({ message: "League not found or has no rosters" });
+      }
+
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+
+      // Get all trades for this league
+      const allTxns = await cache.getTradesForLeague(leagueId);
+      // Filter to only trades (multiple roster_ids involved)
+      const trades = allTxns.filter(t => {
+        try {
+          const rosterIds = t.roster_ids ? JSON.parse(t.roster_ids) : [];
+          return rosterIds.length > 1;
+        } catch { return false; }
+      });
+
+      // Calculate trading metrics for each roster
+      const rosterTrading: Array<{
+        roster_id: number;
+        owner_id: string | null;
+        display_name: string;
+        trades_count: number;
+        draft_window_trades: number;
+        in_season_trades: number;
+        offseason_trades: number;
+        draft_window_pct: number;
+        trade_aggression_index: number;
+        trading_style: string;
+      }> = [];
+
+      for (const roster of rosters) {
+        const rosterId = roster.roster_id;
+        const user = userMap.get(roster.owner_id || "");
+
+        let tradesCount = 0;
+        let draftWindowTrades = 0;
+        let inSeasonTrades = 0;
+        let offseasonTrades = 0;
+
+        for (const txn of trades) {
+          let rosterIds: number[] = [];
+          try { rosterIds = txn.roster_ids ? JSON.parse(txn.roster_ids) : []; } catch {}
+          if (!rosterIds.includes(rosterId)) continue;
+
+          tradesCount++;
+
+          // Classify by timing based on created_at timestamp
+          const ts = txn.created_at || 0;
+          const date = new Date(ts);
+          const month = date.getMonth(); // 0-11
+
+          // Draft window: Aug-Sep (7-8), In-season: Sep-Dec (8-11), Offseason: Jan-Jul (0-6)
+          if (month >= 7 && month <= 8) {
+            draftWindowTrades++;
+          } else if (month >= 9 && month <= 11) {
+            inSeasonTrades++;
+          } else {
+            offseasonTrades++;
+          }
+        }
+
+        const draftWindowPct = tradesCount > 0 
+          ? Math.round((draftWindowTrades / tradesCount) * 100) 
+          : 0;
+
+        rosterTrading.push({
+          roster_id: rosterId,
+          owner_id: roster.owner_id,
+          display_name: user?.display_name || `Team ${rosterId}`,
+          trades_count: tradesCount,
+          draft_window_trades: draftWindowTrades,
+          in_season_trades: inSeasonTrades,
+          offseason_trades: offseasonTrades,
+          draft_window_pct: draftWindowPct,
+          trade_aggression_index: 0, // Will calculate after
+          trading_style: "", // Will set after
+        });
+      }
+
+      // Calculate league median for Trade Aggression Index
+      const tradeCounts = rosterTrading.map(r => r.trades_count).sort((a, b) => a - b);
+      const mid = Math.floor(tradeCounts.length / 2);
+      const leagueMedian = tradeCounts.length % 2 === 0
+        ? (tradeCounts[mid - 1] + tradeCounts[mid]) / 2
+        : tradeCounts[mid];
+
+      // Calculate Trade Aggression Index and trading style
+      for (const r of rosterTrading) {
+        r.trade_aggression_index = leagueMedian > 0 
+          ? Math.round((r.trades_count / leagueMedian) * 100) 
+          : r.trades_count > 0 ? 100 : 0;
+
+        // Trading style based on timing
+        if (r.trades_count === 0) {
+          r.trading_style = "inactive";
+        } else if (r.draft_window_pct >= 60) {
+          r.trading_style = "draft_focused";
+        } else if (r.in_season_trades > r.draft_window_trades && r.in_season_trades > r.offseason_trades) {
+          r.trading_style = "in_season_trader";
+        } else if (r.offseason_trades > r.draft_window_trades && r.offseason_trades > r.in_season_trades) {
+          r.trading_style = "offseason_builder";
+        } else {
+          r.trading_style = "balanced";
+        }
+      }
+
+      // Sort by trades count descending
+      rosterTrading.sort((a, b) => b.trades_count - a.trades_count);
+
+      res.json({
+        league_id: leagueId,
+        total_trades: trades.length,
+        league_median_trades: leagueMedian,
+        teams: rosters.length,
+        rosters: rosterTrading,
+        scope: "snapshot",
+        scope_label: "Latest League Only",
+      });
+    } catch (e) {
+      console.error("Scouting trading error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

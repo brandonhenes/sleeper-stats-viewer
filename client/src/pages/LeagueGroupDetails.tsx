@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Trade } from "@shared/schema";
+import { ScoutingSection } from "@/components/ScoutingSection";
 
 export default function LeagueGroupDetails() {
   const params = useParams<{ groupId: string; username?: string }>();
@@ -702,6 +703,9 @@ export default function LeagueGroupDetails() {
               </div>
             )}
           </motion.div>
+
+          {/* Scouting Section - Phase 1 Leaderboards */}
+          <ScoutingSection leagueId={latestLeagueId} username={username} />
         </div>
       </div>
     </Layout>
