@@ -147,13 +147,20 @@ export default function Market() {
     );
   }
 
-  if (error) {
+  if (error || !data) {
     return (
       <Layout username={username}>
         <main className="container mx-auto px-4 py-6 max-w-6xl">
           <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">
-              Failed to load market trends. Try syncing your profile first.
+            <CardContent className="py-8 text-center space-y-4">
+              <p className="text-muted-foreground">
+                {error ? "Failed to load market trends." : "No market data available."}
+              </p>
+              <Link href={`/u/${username}`}>
+                <Button data-testid="link-sync-profile">
+                  Go to Profile
+                </Button>
+              </Link>
             </CardContent>
           </Card>
         </main>
@@ -161,7 +168,7 @@ export default function Market() {
     );
   }
 
-  const { totals, most_traded_players, most_traded_picks, by_season } = data!;
+  const { totals, most_traded_players, most_traded_picks, by_season } = data;
 
   return (
     <Layout username={username}>
