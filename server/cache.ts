@@ -739,6 +739,58 @@ export const cache = {
     };
   },
 
+  async getMostTradedPlayers(limit: number = 20): Promise<{ player_id: string; player_name: string | null; trade_count: number }[]> {
+    const result = await db.select({
+      player_id: schema.trade_assets.asset_key,
+      player_name: schema.trade_assets.asset_name,
+      trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
+    })
+      .from(schema.trade_assets)
+      .where(eq(schema.trade_assets.asset_type, 'player'))
+      .groupBy(schema.trade_assets.asset_key, schema.trade_assets.asset_name)
+      .orderBy(desc(sql`count(distinct ${schema.trade_assets.trade_id})`))
+      .limit(limit);
+    return result.map(r => ({
+      player_id: r.player_id,
+      player_name: r.player_name,
+      trade_count: Number(r.trade_count),
+    }));
+  },
+
+  async getMostTradedPicks(limit: number = 20): Promise<{ pick_type: string; trade_count: number }[]> {
+    const result = await db.select({
+      pick_type: schema.trade_assets.asset_key,
+      trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
+    })
+      .from(schema.trade_assets)
+      .where(eq(schema.trade_assets.asset_type, 'pick'))
+      .groupBy(schema.trade_assets.asset_key)
+      .orderBy(desc(sql`count(distinct ${schema.trade_assets.trade_id})`))
+      .limit(limit);
+    return result.map(r => ({
+      pick_type: r.pick_type,
+      trade_count: Number(r.trade_count),
+    }));
+  },
+
+  async getTradesBySeason(): Promise<{ season: number; trade_count: number; player_count: number; pick_count: number }[]> {
+    const result = await db.select({
+      season: schema.trade_assets.season,
+      trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
+      player_count: sql<number>`count(case when ${schema.trade_assets.asset_type} = 'player' then 1 end)`,
+      pick_count: sql<number>`count(case when ${schema.trade_assets.asset_type} = 'pick' then 1 end)`,
+    })
+      .from(schema.trade_assets)
+      .groupBy(schema.trade_assets.season)
+      .orderBy(desc(schema.trade_assets.season));
+    return result.map(r => ({
+      season: r.season,
+      trade_count: Number(r.trade_count),
+      player_count: Number(r.player_count),
+      pick_count: Number(r.pick_count),
+    }));
+  },
+
   async clearTradeAssetsForLeague(leagueId: string): Promise<void> {
     await db.delete(schema.trade_assets).where(eq(schema.trade_assets.league_id, leagueId));
   },

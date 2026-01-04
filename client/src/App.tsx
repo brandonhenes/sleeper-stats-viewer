@@ -12,6 +12,7 @@ import Players from "@/pages/Players";
 import Compare from "@/pages/Compare";
 import CompareResults from "@/pages/CompareResults";
 import Scouting from "@/pages/Scouting";
+import Market from "@/pages/Market";
 
 function Router() {
   return (
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/scouting/:username" component={Scouting} />
       <Route path="/compare" component={Compare} />
       <Route path="/compare/:userA/:userB" component={CompareResults} />
+      <Route path="/market" component={Market} />
       <Route path="/league/:id" component={LeagueDetails} />
       <Route path="/group/:groupId" component={LeagueGroupDetails} />
       <Route component={NotFound} />

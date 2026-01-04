@@ -484,6 +484,9 @@ export async function registerRoutes(
 
       // Count players_master
       const playerCount = await cache.getPlayerCount();
+      
+      // Count trade assets
+      const tradeAssetCounts = await cache.getTradeAssetCounts();
 
       return res.json({
         user_exists: true,
@@ -491,10 +494,12 @@ export async function registerRoutes(
         username: user.username,
         leagues_count: leagues.length,
         rosters_count: rosters.length,
+        rosters_with_players: rosters.filter((r: any) => r.players && r.players.length > 0).length,
         total_groups: leagueGroups.length,
         active_groups: activeGroups.length,
         history_groups: historyGroups.length,
         trades_count: tradesCount,
+        trade_assets_count: tradeAssetCounts.total,
         players_master_count: playerCount,
         current_nfl_season: getCurrentNFLSeason(),
       });
@@ -3004,6 +3009,109 @@ export async function registerRoutes(
       res.json(counts);
     } catch (e) {
       console.error("Trade assets stats error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/compare/shared-leagues - Get shared leagues between two users
+  app.get("/api/compare/shared-leagues", async (req, res) => {
+    const { userA, userB } = req.query;
+    if (!userA || !userB) {
+      return res.status(400).json({ message: "Both userA and userB are required" });
+    }
+
+    try {
+      // Get user IDs
+      const cachedUserA = await cache.getUserByUsername(userA as string);
+      const cachedUserB = await cache.getUserByUsername(userB as string);
+      
+      if (!cachedUserA || !cachedUserB) {
+        return res.status(404).json({ message: "One or both users not found. Sync their data first." });
+      }
+
+      // Get leagues for each user
+      const leaguesA = await cache.getLeaguesForUser(cachedUserA.user_id);
+      const leaguesB = await cache.getLeaguesForUser(cachedUserB.user_id);
+      
+      // Find shared leagues (same league_id)
+      const leagueIdSetA = new Set(leaguesA.map(l => l.league_id));
+      const sharedLeagues = leaguesB.filter(l => leagueIdSetA.has(l.league_id));
+      
+      // Get roster data for each shared league
+      const sharedLeagueDetails = await Promise.all(
+        sharedLeagues.map(async (league) => {
+          const rosters = await cache.getRostersForLeague(league.league_id);
+          const leagueUsers = await cache.getLeagueUsers(league.league_id);
+          
+          const rosterA = rosters.find(r => r.owner_id === cachedUserA.user_id);
+          const rosterB = rosters.find(r => r.owner_id === cachedUserB.user_id);
+          
+          // Get players for each roster
+          const playersA = rosterA ? await cache.getRosterPlayersForUserInLeague(league.league_id, rosterA.owner_id) : [];
+          const playersB = rosterB ? await cache.getRosterPlayersForUserInLeague(league.league_id, rosterB.owner_id) : [];
+          
+          // Get player details
+          const playerIdsA = playersA.map((p: { player_id: string }) => p.player_id);
+          const playerIdsB = playersB.map((p: { player_id: string }) => p.player_id);
+          const allPlayerIds = Array.from(new Set([...playerIdsA, ...playerIdsB]));
+          const playerDetails = await cache.getPlayersByIds(allPlayerIds);
+          const playerMap = new Map(playerDetails.map(p => [p.player_id, p]));
+          
+          const formatPlayer = (pid: string) => {
+            const player = playerMap.get(pid);
+            if (DST_TEAMS[pid]) {
+              return { player_id: pid, name: `${pid} DST`, position: "DEF" };
+            }
+            return {
+              player_id: pid,
+              name: player?.full_name || pid,
+              position: player?.position || null,
+            };
+          };
+          
+          return {
+            league_id: league.league_id,
+            name: league.name,
+            season: league.season,
+            userA_roster_id: rosterA?.roster_id || null,
+            userB_roster_id: rosterB?.roster_id || null,
+            userA_players: playersA.map((p: { player_id: string }) => formatPlayer(p.player_id)),
+            userB_players: playersB.map((p: { player_id: string }) => formatPlayer(p.player_id)),
+          };
+        })
+      );
+      
+      res.json({
+        userA: { user_id: cachedUserA.user_id, username: cachedUserA.username, display_name: cachedUserA.display_name },
+        userB: { user_id: cachedUserB.user_id, username: cachedUserB.username, display_name: cachedUserB.display_name },
+        shared_leagues: sharedLeagueDetails.sort((a, b) => b.season - a.season),
+      });
+    } catch (e) {
+      console.error("Shared leagues error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/market/trends - Get market trends across all leagues
+  app.get("/api/market/trends", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 20;
+      
+      const [counts, mostTradedPlayers, mostTradedPicks, bySeason] = await Promise.all([
+        cache.getTradeAssetCounts(),
+        cache.getMostTradedPlayers(limit),
+        cache.getMostTradedPicks(limit),
+        cache.getTradesBySeason(),
+      ]);
+
+      res.json({
+        totals: counts,
+        most_traded_players: mostTradedPlayers,
+        most_traded_picks: mostTradedPicks,
+        by_season: bySeason,
+      });
+    } catch (e) {
+      console.error("Market trends error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

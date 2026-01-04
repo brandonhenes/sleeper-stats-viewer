@@ -1,11 +1,12 @@
 import { useParams, Link } from "wouter";
-import { useSleeperOverview, usePlayerExposure, useSleeperSync, useSyncStatus } from "@/hooks/use-sleeper";
+import { useSleeperOverview, usePlayerExposure, useSleeperSync, useSyncStatus, useSharedLeagues } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertCircle, Users, ArrowLeft, Trophy, RefreshCw } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2, AlertCircle, Users, ArrowLeft, Trophy, RefreshCw, Target, Handshake, ChevronDown, ChevronRight } from "lucide-react";
 import { Layout } from "@/components/Layout";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
@@ -19,6 +20,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 export default function CompareResults() {
   const { userA, userB } = useParams<{ userA: string; userB: string }>();
@@ -28,6 +34,9 @@ export default function CompareResults() {
   const { data: dataB, isLoading: loadingB, error: errorB } = useSleeperOverview(userB);
   const { data: exposureA, isLoading: exposureLoadingA } = usePlayerExposure(userA);
   const { data: exposureB, isLoading: exposureLoadingB } = usePlayerExposure(userB);
+  const { data: sharedLeaguesData, isLoading: sharedLeaguesLoading } = useSharedLeagues(userA, userB);
+  
+  const [expandedLeagues, setExpandedLeagues] = useState<Set<string>>(new Set());
 
   const syncMutationA = useSleeperSync();
   const syncMutationB = useSleeperSync();
@@ -390,6 +399,117 @@ export default function CompareResults() {
                 )}
               </Card>
             </div>
+
+            {/* Trade Targeting - Shared Leagues */}
+            <Card className="mt-6">
+              <div className="p-4 border-b flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Target className="w-4 h-4 text-primary" />
+                  Trade Targeting - Shared Leagues
+                </h3>
+                <Badge variant="outline">
+                  {sharedLeaguesLoading ? "Loading..." : `${sharedLeaguesData?.shared_leagues.length || 0} leagues`}
+                </Badge>
+              </div>
+              {sharedLeaguesLoading ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                  Loading shared leagues...
+                </div>
+              ) : !sharedLeaguesData || sharedLeaguesData.shared_leagues.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  <Handshake className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  No shared leagues found between these users.
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {sharedLeaguesData.shared_leagues.map((league, leagueIndex) => {
+                    const isExpanded = expandedLeagues.has(league.league_id);
+                    const toggleExpand = () => {
+                      setExpandedLeagues(prev => {
+                        const next = new Set(prev);
+                        if (next.has(league.league_id)) {
+                          next.delete(league.league_id);
+                        } else {
+                          next.add(league.league_id);
+                        }
+                        return next;
+                      });
+                    };
+                    
+                    // Find trade bait: players userA has that userB doesn't (and vice versa)
+                    // Guard against null/undefined player arrays
+                    const userAPlayers = league.userA_players || [];
+                    const userBPlayers = league.userB_players || [];
+                    const userAPlayerIds = new Set(userAPlayers.map(p => p.player_id));
+                    const userBPlayerIds = new Set(userBPlayers.map(p => p.player_id));
+                    const tradeBaitFromA = userAPlayers.filter(p => !userBPlayerIds.has(p.player_id));
+                    const tradeBaitFromB = userBPlayers.filter(p => !userAPlayerIds.has(p.player_id));
+                    
+                    return (
+                      <Collapsible key={league.league_id} open={isExpanded} onOpenChange={toggleExpand}>
+                        <CollapsibleTrigger className="w-full p-4 flex items-center justify-between gap-2 hover-elevate" data-testid={`league-toggle-${leagueIndex}`}>
+                          <div className="flex items-center gap-3">
+                            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            <span className="font-medium">{league.name}</span>
+                            <Badge variant="secondary">{league.season}</Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">{(league.userA_players || []).length} vs {(league.userB_players || []).length} players</Badge>
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="px-4 pb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="p-3 rounded-md bg-muted/30">
+                                <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                                  <Target className="w-3 h-3" />
+                                  @{userA} can offer ({tradeBaitFromA.length})
+                                </div>
+                                {tradeBaitFromA.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground">No unique players</p>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1">
+                                    {tradeBaitFromA.slice(0, 10).map((p, idx) => (
+                                      <Badge key={p.player_id} variant="outline" className="text-xs" data-testid={`bait-a-${leagueIndex}-${idx}`}>
+                                        {p.name} ({p.position || "?"})
+                                      </Badge>
+                                    ))}
+                                    {tradeBaitFromA.length > 10 && (
+                                      <Badge variant="secondary" className="text-xs">+{tradeBaitFromA.length - 10} more</Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="p-3 rounded-md bg-muted/30">
+                                <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                                  <Target className="w-3 h-3" />
+                                  @{userB} can offer ({tradeBaitFromB.length})
+                                </div>
+                                {tradeBaitFromB.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground">No unique players</p>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1">
+                                    {tradeBaitFromB.slice(0, 10).map((p, idx) => (
+                                      <Badge key={p.player_id} variant="outline" className="text-xs" data-testid={`bait-b-${leagueIndex}-${idx}`}>
+                                        {p.name} ({p.position || "?"})
+                                      </Badge>
+                                    ))}
+                                    {tradeBaitFromB.length > 10 && (
+                                      <Badge variant="secondary" className="text-xs">+{tradeBaitFromB.length - 10} more</Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
           </motion.div>
         )}
       </div>

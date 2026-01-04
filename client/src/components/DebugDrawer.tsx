@@ -17,6 +17,7 @@ interface DebugData {
   history_groups?: number;
   active_latest_league_ids?: string[];
   trades_count?: number;
+  trade_assets_count?: number;
   players_master_count?: number;
   current_nfl_season?: number;
 }
@@ -176,6 +177,10 @@ export function DebugDrawer({ username, groupId, leagueId }: DebugDrawerProps) {
                     <div className="flex justify-between">
                       <span>Trades:</span>
                       <span className="font-mono">{debugData.trades_count}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Trade Assets:</span>
+                      <span className="font-mono">{debugData.trade_assets_count}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Players Master:</span>

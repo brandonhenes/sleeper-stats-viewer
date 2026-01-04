@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Sparkles, Loader2 } from "lucide-react";
+import { Search, Sparkles, Loader2, TrendingUp } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function Home() {
@@ -69,7 +69,7 @@ export default function Home() {
               </div>
             </form>
 
-            <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-4 text-center text-sm text-muted-foreground">
+            <div className="mt-12 grid grid-cols-1 md:grid-cols-4 gap-4 text-center text-sm text-muted-foreground">
               <div className="p-4 rounded-lg bg-card/50 border border-border/30">
                 <div className="font-semibold text-foreground mb-1">League History</div>
                 <div>View aggregated records across seasons</div>
@@ -82,6 +82,15 @@ export default function Home() {
                 <div className="font-semibold text-foreground mb-1">Compare Users</div>
                 <div>Analyze tendencies between managers</div>
               </div>
+              <Link href="/market">
+                <div className="p-4 rounded-lg bg-card/50 border border-border/30 hover-elevate cursor-pointer" data-testid="link-market">
+                  <div className="font-semibold text-foreground mb-1 flex items-center justify-center gap-1">
+                    <TrendingUp className="w-4 h-4" />
+                    Market Trends
+                  </div>
+                  <div>Most traded players and picks</div>
+                </div>
+              </Link>
             </div>
           </motion.div>
         </div>

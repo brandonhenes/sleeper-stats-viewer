@@ -109,18 +109,23 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
-### January 4, 2026 (Phase 2 - Teams, Draft Capital, Trade Assets)
+### January 4, 2026 (Phase 2 Complete - Teams, Draft Capital, Trade Assets, Market, Trade Targeting)
 - **Phase 2 Backend**: Created new endpoints for league-wide scouting
   - `GET /api/league/:leagueId/teams` - Returns all teams with current rosters, player details, position badges
   - `GET /api/league/:leagueId/draft-capital/all` - Returns draft capital for ALL teams with Year/Round grid and Pick Hoard Index
   - `POST /api/league/:leagueId/normalize-trades` - Normalizes trade data into trade_assets table
   - `GET /api/league/:leagueId/trade-assets` - Returns normalized trade assets with sent/received direction
+  - `GET /api/market/trends` - Global market trends: most traded players, picks, by season
+  - `GET /api/compare/shared-leagues` - Find shared leagues between two users with rosters for trade targeting
 - **Trade Assets Schema**: Created trade_assets table with unique constraint (trade_id, roster_id, asset_key, direction) for deduplication
 - **Phase 2 Frontend**: 
   - TeamsSection component with expandable rosters and toggle between roster view and draft capital view
   - TradesSection component showing trades with human-readable player names and picks, organized by trade with sent/received columns
-  - useLeagueTeams, useAllDraftCapital, useTradeAssets, useNormalizeTrades hooks
-- **Integration**: TeamsSection and TradesSection added to LeagueGroupDetails page
+  - Market page showing most traded players/picks with season breakdown
+  - Enhanced CompareResults with Trade Targeting section showing shared leagues and trade bait
+  - useLeagueTeams, useAllDraftCapital, useTradeAssets, useNormalizeTrades, useSharedLeagues hooks
+- **Integration**: TeamsSection and TradesSection added to LeagueGroupDetails page, Market link on Home page
+- **Debug Enhancements**: Added trade assets count to debug drawer
 
 ### January 4, 2026 (Phase 1 Scouting Leaderboards)
 - **Phase 1 Backend Complete**: Created 5 new scouting leaderboard endpoints that return data for ALL rosters in a league (not just current user)

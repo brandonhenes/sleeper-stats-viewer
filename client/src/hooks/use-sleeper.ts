@@ -524,3 +524,49 @@ export function useNormalizeTrades() {
     },
   });
 }
+
+// Shared league player type
+interface SharedLeaguePlayer {
+  player_id: string;
+  name: string;
+  position: string | null;
+}
+
+// Shared league data type
+interface SharedLeague {
+  league_id: string;
+  name: string;
+  season: number;
+  userA_roster_id: number | null;
+  userB_roster_id: number | null;
+  userA_players: SharedLeaguePlayer[];
+  userB_players: SharedLeaguePlayer[];
+}
+
+// Shared leagues response type
+interface SharedLeaguesResponse {
+  userA: { user_id: string; username: string; display_name: string };
+  userB: { user_id: string; username: string; display_name: string };
+  shared_leagues: SharedLeague[];
+}
+
+// GET /api/compare/shared-leagues - Get shared leagues between two users
+export function useSharedLeagues(userA: string | undefined, userB: string | undefined) {
+  return useQuery<SharedLeaguesResponse>({
+    queryKey: ["/api/compare/shared-leagues", userA, userB],
+    queryFn: async () => {
+      if (!userA || !userB) throw new Error("Both users required");
+      const url = `/api/compare/shared-leagues?userA=${encodeURIComponent(userA)}&userB=${encodeURIComponent(userB)}`;
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("One or both users not found");
+        throw new Error("Failed to fetch shared leagues");
+      }
+      
+      return res.json();
+    },
+    enabled: !!userA && !!userB,
+    staleTime: 1000 * 60 * 5,
+  });
+}
