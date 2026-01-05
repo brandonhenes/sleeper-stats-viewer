@@ -109,6 +109,14 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 5, 2026 (Phase 2.1 UX Polish - Filtering and Timeframe Controls)
+- **Market Trends**: Added timeframe selector (7D/30D/Season/All Time) defaulting to 30D, plus Active/History toggle for league scope filtering
+- **League Trades (TradesSection)**: Defaults to latest season with season-based filtering, newest-first sorting, optional groupId/leagueId props with graceful null handling
+- **Roster Activity (Churn)**: Fixed timeframe filters - "lifetime" now aggregates transactions from ALL leagues in a group via groupId parameter; returns 400 error when no league history found
+- **Draft Capital**: Generates baseline years (current season, +1, +2) even without traded_picks; added `baseline_years_used` flag to response
+- **Debug panels**: Added ?debug=1 support to churn (leagues_queried, scope) and draft-capital (baseline_years, current_season) endpoints
+- **Hook improvements**: `useGroupTradeAssets` now uses `enabled: !!groupId` to prevent queries with empty groupId; `useChurnStats` accepts optional groupId for lifetime scope
+
 ### January 4, 2026 (Phase 2 Complete - Teams, Draft Capital, Trade Assets, Market, Trade Targeting)
 - **Phase 2 Backend**: Created new endpoints for league-wide scouting
   - `GET /api/league/:leagueId/teams` - Returns all teams with current rosters, player details, position badges
