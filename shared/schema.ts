@@ -156,6 +156,18 @@ export const players_master = pgTable("players_master", {
   updated_at: bigint("updated_at", { mode: "number" }).notNull(),
 });
 
+// User exposure summary for trade targeting
+// Caches each user's player exposure across their active leagues
+export const user_exposure_summary = pgTable("user_exposure_summary", {
+  username: text("username").primaryKey(),
+  season: integer("season").notNull(),
+  active_league_count: integer("active_league_count").notNull(),
+  exposure_json: jsonb("exposure_json").notNull(), // Map<player_id, {count, pct, pos}>
+  last_synced_at: bigint("last_synced_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_exposure_season").on(table.season),
+]);
+
 // Sleeper user schema
 export const sleeperUserSchema = z.object({
   user_id: z.string(),
@@ -375,3 +387,38 @@ export type TradesResponse = z.infer<typeof tradesResponseSchema>;
 export type Player = z.infer<typeof playerSchema>;
 export type PlayerExposure = z.infer<typeof playerExposureSchema>;
 export type PlayerExposureResponse = z.infer<typeof playerExposureResponseSchema>;
+
+// Trade Targets schemas
+export const matchedAssetSchema = z.object({
+  player_id: z.string(),
+  name: z.string(),
+  pos: z.string().nullable(),
+  team: z.string().nullable(),
+  exposure_pct: z.number(),
+});
+
+export const targetMetaSchema = z.object({
+  active_league_count: z.number(),
+  last_synced_at: z.number().nullable(),
+  is_partial: z.boolean(),
+});
+
+export const tradeTargetSchema = z.object({
+  opponent_username: z.string(),
+  opponent_display_name: z.string().nullable(),
+  target_score: z.number(),
+  matched_assets: z.array(matchedAssetSchema),
+  meta: targetMetaSchema,
+});
+
+export const targetsResponseSchema = z.object({
+  league_id: z.string(),
+  league_name: z.string(),
+  season: z.number(),
+  my_roster_id: z.number(),
+  targets: z.array(tradeTargetSchema),
+});
+
+export type MatchedAsset = z.infer<typeof matchedAssetSchema>;
+export type TradeTarget = z.infer<typeof tradeTargetSchema>;
+export type TargetsResponse = z.infer<typeof targetsResponseSchema>;

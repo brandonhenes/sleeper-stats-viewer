@@ -1,0 +1,174 @@
+We need to redesign “Targets” so it is a TRADE TARGETING panel, NOT a link to Compare.
+
+CURRENT PROBLEM:
+- Targets button routes to /compare which requires manual input and gives generic output.
+- User wants Targets to already be populated per league.
+
+NEW BEHAVIOR:
+- Clicking “Targets” on a league tile should open an inline panel or modal (no page navigation) that shows:
+  1) Top target league mates (ranked)
+  2) For each target: the specific players YOU have in this league that THEY are most likely to want (based on their cross-league exposure)
+  3) A confidence/coverage indicator if their exposure profile is incomplete
+
+NO CHANGE REQUESTED:
+- Keep Compare tab if you want, but Targets must be useful without Compare.
+
+────────────────────────────────────────────────────────────
+A) DEFINE TRADE TARGETS (ALGORITHM)
+────────────────────────────────────────────────────────────
+For a given league (latest league_id for the group) and User A (me):
+
+Step 1: Determine my roster in this league
+- myRosterPlayers = players on my roster (current snapshot)
+
+Step 2: For each opponent (league mate) in that league:
+- opponentExposureMap = exposure% per player across opponent’s ACTIVE leagues (not history)
+- Compute targetScore(opponent) =
+    sum over player in myRosterPlayers of opponentExposurePct(player)
+  Optionally weight:
+    - +20% weight if player is a starter position (QB/RB/WR/TE) and opponent exposure at that position is high
+    - +10% weight if opponent is “in-season trader” (from Phase 1 trade propensity)
+- Produce “matchedAssets” list for opponent:
+    top N players from myRosterPlayers sorted by opponentExposurePct(player) desc
+    show only those above a threshold (e.g., >= 10% exposure) OR take top 5.
+
+Output per opponent:
+- opponentUsername
+- targetScore
+- matchedAssets: [{player_id, name, pos, team, opponentExposurePct}]
+- opponentProfileMeta: {activeLeagueCountUsed, lastExposureSyncAt, isPartial}
+
+Ranking:
+- Sort opponents by targetScore desc.
+
+────────────────────────────────────────────────────────────
+B) HARD REQUIREMENT: EXPOSURE PROFILE MUST EXIST FOR OPPONENTS
+────────────────────────────────────────────────────────────
+To pre-populate targets, we must compute (and cache) exposure profiles for league mates.
+
+Create DB tables:
+1) user_exposure_summary
+- username TEXT PK
+- scope TEXT ('active')
+- season INT (current NFL season)
+- active_league_count INT
+- last_synced_at TIMESTAMP
+- exposure_json JSONB  // map player_id -> {count, pct, pos}
+- pos_top10_json JSONB // optional precomputed top 10 per position
+
+2) user_league_membership
+- league_id TEXT
+- username TEXT
+- owner_id TEXT
+- roster_id INT
+- season INT
+- updated_at TIMESTAMP
+PK: (league_id, username)
+
+When syncing User A (me):
+- After syncing my active leagues, ALSO sync league mate exposure profiles for league mates in those active leagues.
+- Limit to a sane amount:
+  - Only league mates in my ACTIVE leagues
+  - Concurrency cap 2–3
+  - Cache TTL: 24h (or until manual “Sync Now”)
+- If a league mate exposure profile is missing and user clicks Targets:
+  - trigger a “fast exposure sync” for just those opponents (show a spinner + “building targets…”)
+  - return results when done (do NOT navigate away).
+
+Exposure profile computation for username:
+- Fetch their active leagues:
+  GET /user/<username>/leagues/nfl/<season>
+- For each league_id, fetch rosters, find their roster, collect player_ids
+- Compute counts per player across leagues; pct = count / activeLeagueCount
+- Save to user_exposure_summary
+
+IMPORTANT: Exposure must use ACTIVE leagues only (not historical league instances).
+
+────────────────────────────────────────────────────────────
+C) NEW API ENDPOINTS (SERVER)
+────────────────────────────────────────────────────────────
+1) GET /api/targets?username=A&league_id=<latestLeagueId>
+Returns:
+{
+  league: {league_id, name, season},
+  myRoster: {roster_id, players_sample...},
+  targets: [
+    {
+      opponent_username,
+      target_score,
+      matched_assets: [{player_id, name, pos, team, exposure_pct}],
+      meta: {activeLeagueCountUsed, lastExposureSyncAt, isPartial}
+    }, ...
+  ]
+}
+
+2) POST /api/exposure/sync?username=<name>
+For on-demand “fast sync” for league mates.
+
+3) GET /api/exposure/top?username=<name>
+Returns precomputed top10 by position (QB/RB/WR/TE) for Trade Targeting UI.
+
+────────────────────────────────────────────────────────────
+D) UI CHANGES (MANDATORY)
+────────────────────────────────────────────────────────────
+1) League tile “Targets” button:
+- Change from navigation link to inline modal/panel.
+- On click:
+  - call GET /api/targets?username=me&league_id=...
+  - show loading state
+  - render results inside modal/panel
+
+2) Trade Targets panel contents:
+- Title: “Trade Targets (based on their cross-league exposure)”
+- Show top 5 opponents:
+  Opponent | Target Score | Top assets you have that they like
+  Example:
+    kaylala1 — score 1.92 — Cam Ward (28%), Kyren Williams (21%), Mark Andrews (18%)
+- Add a “coverage” chip:
+  - “Complete” if their exposure profile exists and was synced within 24h
+  - “Partial” if missing leagues or recently failed sync
+
+3) Optional: “Targets by Position”
+- filter to show only QB/RB/WR/TE matches.
+
+DO NOT route to Compare.
+
+────────────────────────────────────────────────────────────
+E) GOTCHAS / RESILIENCE (MUST IMPLEMENT)
+────────────────────────────────────────────────────────────
+1) Missing exposure profiles:
+- If opponent exposure missing:
+  - show “Building profile…” and trigger fast sync
+  - do NOT show empty or redirect
+
+2) Rate limiting / performance:
+- Never sync all opponents across all leagues at once without caps.
+- Cache exposure profiles with TTL 24h.
+- Provide “Sync Targets” button to refresh.
+
+3) DST / weird player IDs:
+- DST can be team abbreviations; map them or exclude from matching assets.
+
+4) League scope:
+- Targets must be computed from:
+  - MY CURRENT roster in THIS league (latest league_id)
+  - OPPONENT ACTIVE exposure profile (active leagues only)
+- Clearly label: “Active exposure scope”.
+
+5) Multi-team trades:
+- Not required for targets, but trade parsing must not break if 3-team trades exist.
+
+6) Current year vs overall:
+- For exposure, default to current season active leagues.
+- Optional: add toggle “overall” later; do not mix silently.
+
+────────────────────────────────────────────────────────────
+F) ACCEPTANCE TESTS
+────────────────────────────────────────────────────────────
+1) Clicking “Targets” on any league tile does NOT navigate to /compare.
+2) A modal/panel opens and shows ranked league mates.
+3) Each league mate shows specific players YOU own in that league that they have high exposure to across their active leagues.
+4) If opponent exposure is missing, the UI shows “Building profile…” and then populates within the same panel.
+5) Results default to active-only scope and are labeled.
+
+Implement these changes minimally in existing codebase, reuse current DB and player mapping.
