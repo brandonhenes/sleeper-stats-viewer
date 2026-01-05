@@ -1531,14 +1531,11 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Username required" });
       }
 
-      // Fetch user from Sleeper API
-      const userResp = await sleeperQueue.add(() => 
-        fetch(`https://api.sleeper.app/v1/user/${username}`)
-      );
-      if (!userResp.ok) {
+      // Fetch user from Sleeper API using existing helper
+      const sleeperUser = await getUserByUsername(username);
+      if (!sleeperUser) {
         return res.status(404).json({ message: "User not found on Sleeper" });
       }
-      const sleeperUser = await userResp.json();
       const userId = sleeperUser.user_id;
 
       // Get current NFL season (approximate)
@@ -1546,56 +1543,49 @@ export async function registerRoutes(
       const currentMonth = new Date().getMonth();
       const season = currentMonth >= 2 ? currentYear : currentYear - 1;
 
-      // Fetch their active leagues for current season
-      const leaguesResp = await sleeperQueue.add(() =>
-        fetch(`https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${season}`)
-      );
-      if (!leaguesResp.ok) {
+      // Fetch their active leagues for current season using existing helper
+      const leagues = await getLeaguesForSeason(userId, "nfl", season) as any[] | null;
+      if (!leagues) {
         return res.status(500).json({ message: "Failed to fetch leagues" });
       }
-      const leagues = await leaguesResp.json() as any[];
 
-      // Only count active leagues (status === "in_season" or "complete" for current season)
+      // Only count active leagues (status !== "archived")
       const activeLeagues = leagues.filter((l: any) => l.status !== "archived");
       
-      // Collect player exposure across all active leagues
+      // Collect player exposure across all active leagues with concurrency limit
       const playerCounts = new Map<string, { count: number; pos: string | null }>();
 
-      for (const league of activeLeagues) {
-        // Fetch rosters for this league
-        const rostersResp = await sleeperQueue.add(() =>
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
-        );
-        if (!rostersResp.ok) continue;
-        const rosters = await rostersResp.json() as any[];
+      await withConcurrencyLimit(activeLeagues, 3, async (league) => {
+        // Fetch rosters for this league using existing helper
+        const rosters = await jget(`${BASE}/league/${league.league_id}/rosters`) as any[] | null;
+        if (!rosters) return;
 
         // Find this user's roster
         const myRoster = rosters.find((r: any) => r.owner_id === userId);
-        if (!myRoster || !myRoster.players) continue;
+        if (!myRoster || !myRoster.players) return;
 
         for (const playerId of myRoster.players) {
           const existing = playerCounts.get(playerId);
           if (existing) {
             existing.count++;
           } else {
-            // Get player position from cache
             const player = await cache.getPlayer(playerId);
             playerCounts.set(playerId, { count: 1, pos: player?.position || null });
           }
         }
-      }
+      });
 
       // Calculate exposure percentages
       const activeLeagueCount = activeLeagues.length;
       const exposureJson: Record<string, { count: number; pct: number; pos: string | null }> = {};
       
-      for (const [playerId, data] of playerCounts.entries()) {
+      playerCounts.forEach((data, playerId) => {
         exposureJson[playerId] = {
           count: data.count,
           pct: activeLeagueCount > 0 ? Math.round((data.count / activeLeagueCount) * 100) : 0,
           pos: data.pos,
         };
-      }
+      });
 
       // Save to cache
       await cache.upsertExposureProfile({

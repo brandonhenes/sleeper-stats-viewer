@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -5,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Trophy, Users, Calendar, ArrowRightLeft, Target } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LeagueGroup } from "@shared/schema";
+import { TradeTargetsModal } from "./TradeTargetsModal";
 
 interface LeagueGroupCardProps {
   group: LeagueGroup;
@@ -13,6 +15,7 @@ interface LeagueGroupCardProps {
 }
 
 export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps) {
+  const [targetsOpen, setTargetsOpen] = useState(false);
   // Format W-L or W-L-T record
   const formatRecord = () => {
     const { wins, losses, ties } = group.overall_record;
@@ -95,16 +98,34 @@ export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps
             </div>
             
             <div className="pt-3 flex gap-2">
-              <Link href={username ? `/compare?leagueId=${group.latest_league_id}&userA=${username}` : `/compare?leagueId=${group.latest_league_id}`} onClick={(e) => e.stopPropagation()}>
-                <Button variant="outline" size="sm" className="gap-1" data-testid={`button-targets-${group.group_id}`}>
-                  <Target className="w-3 h-3" />
-                  Targets
-                </Button>
-              </Link>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setTargetsOpen(true);
+                }}
+                data-testid={`button-targets-${group.group_id}`}
+              >
+                <Target className="w-3 h-3" />
+                Targets
+              </Button>
             </div>
           </div>
         </Card>
       </motion.div>
+
+      {username && group.latest_league_id && (
+        <TradeTargetsModal
+          isOpen={targetsOpen}
+          onClose={() => setTargetsOpen(false)}
+          username={username}
+          leagueId={group.latest_league_id}
+          leagueName={group.name}
+        />
+      )}
     </Link>
   );
 }

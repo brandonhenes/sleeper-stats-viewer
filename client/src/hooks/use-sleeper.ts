@@ -624,3 +624,77 @@ export function useSharedLeagues(userA: string | undefined, userB: string | unde
     staleTime: 1000 * 60 * 5,
   });
 }
+
+// Trade Targets types
+interface MatchedAsset {
+  player_id: string;
+  name: string;
+  pos: string | null;
+  team: string | null;
+  exposure_pct: number;
+}
+
+interface TargetMeta {
+  active_league_count: number;
+  last_synced_at: number | null;
+  is_partial: boolean;
+}
+
+interface TradeTarget {
+  opponent_username: string;
+  opponent_display_name: string | null;
+  target_score: number;
+  matched_assets: MatchedAsset[];
+  meta: TargetMeta;
+}
+
+interface TargetsResponse {
+  league_id: string;
+  league_name: string;
+  season: number;
+  my_roster_id: number;
+  targets: TradeTarget[];
+}
+
+// GET /api/targets - Get trade targets for a league
+export function useTradeTargets(username: string | undefined, leagueId: string | undefined) {
+  return useQuery<TargetsResponse>({
+    queryKey: ["/api/targets", username, leagueId],
+    queryFn: async () => {
+      if (!username || !leagueId) throw new Error("Username and league_id required");
+      const url = `/api/targets?username=${encodeURIComponent(username)}&league_id=${encodeURIComponent(leagueId)}`;
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("Not found");
+        throw new Error("Failed to fetch trade targets");
+      }
+      
+      return res.json();
+    },
+    enabled: !!username && !!leagueId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+// POST /api/exposure/sync - Sync exposure profile for a user
+export function useExposureSync() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async (username: string) => {
+      const url = `/api/exposure/sync?username=${encodeURIComponent(username)}`;
+      const res = await fetch(url, { method: "POST" });
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("User not found");
+        throw new Error("Failed to sync exposure");
+      }
+      
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/targets"] });
+    },
+  });
+}
