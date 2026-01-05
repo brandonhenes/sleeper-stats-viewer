@@ -1098,7 +1098,7 @@ export async function registerRoutes(
       // Get all leagues in this group
       const allLeagues = await cache.getAllLeaguesMap();
       const groupLeagueIds: string[] = [];
-      let maxSeason = "0";
+      let maxSeason = 0;
       
       for (const l of allLeagues) {
         const league = await cache.getLeagueById(l.league_id);
@@ -1112,7 +1112,7 @@ export async function registerRoutes(
       
       // Filter to latest season if mode is "current"
       let filteredLeagueIds = groupLeagueIds;
-      if (viewMode === "current" && maxSeason !== "0") {
+      if (viewMode === "current" && maxSeason > 0) {
         filteredLeagueIds = [];
         for (const lid of groupLeagueIds) {
           const league = await cache.getLeagueById(lid);
@@ -1387,6 +1387,233 @@ export async function registerRoutes(
       if (e instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid input" });
       }
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/targets - Get trade targets for a league based on opponent exposure
+  app.get("/api/targets", async (req, res) => {
+    try {
+      const { username, league_id } = req.query;
+      
+      if (!username || typeof username !== "string") {
+        return res.status(400).json({ message: "Username required" });
+      }
+      if (!league_id || typeof league_id !== "string") {
+        return res.status(400).json({ message: "league_id required" });
+      }
+
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const userId = cachedUser.user_id;
+      const league = await cache.getLeagueById(league_id);
+      if (!league) {
+        return res.status(404).json({ message: "League not found" });
+      }
+
+      // Get my roster in this league
+      const myRoster = await cache.getRosterForUserInLeague(league_id, userId);
+      if (!myRoster) {
+        return res.status(404).json({ message: "No roster found for user in this league" });
+      }
+
+      // Get my players
+      const myPlayers = await cache.getRosterPlayersForUserInLeague(league_id, userId);
+      const myPlayerIds = myPlayers.map(p => p.player_id);
+
+      // Get all rosters in the league to find opponents
+      const allRosters = await cache.getRostersForLeague(league_id);
+      const leagueUsers = await cache.getLeagueUsers(league_id);
+
+      // Build targets for each opponent
+      const targets: Array<{
+        opponent_username: string;
+        opponent_display_name: string | null;
+        target_score: number;
+        matched_assets: Array<{
+          player_id: string;
+          name: string;
+          pos: string | null;
+          team: string | null;
+          exposure_pct: number;
+        }>;
+        meta: {
+          active_league_count: number;
+          last_synced_at: number | null;
+          is_partial: boolean;
+        };
+      }> = [];
+
+      for (const roster of allRosters) {
+        // Skip my own roster
+        if (roster.owner_id === userId) continue;
+
+        // Find opponent's username from league_users
+        const oppUser = leagueUsers.find(u => u.user_id === roster.owner_id);
+        if (!oppUser) continue;
+
+        // Get opponent's cached user info for username
+        const oppCachedUser = await cache.getUserById(roster.owner_id);
+        const oppUsername = oppCachedUser?.username;
+        if (!oppUsername) continue;
+
+        // Get opponent's exposure profile
+        const exposureProfile = await cache.getExposureProfile(oppUsername);
+        
+        const matchedAssets: Array<{
+          player_id: string;
+          name: string;
+          pos: string | null;
+          team: string | null;
+          exposure_pct: number;
+        }> = [];
+        let targetScore = 0;
+
+        if (exposureProfile) {
+          // Calculate target score based on my players they have exposure to
+          for (const playerId of myPlayerIds) {
+            const playerExposure = exposureProfile.exposure_json[playerId];
+            if (playerExposure && playerExposure.pct >= 10) {
+              const player = await cache.getPlayer(playerId);
+              matchedAssets.push({
+                player_id: playerId,
+                name: player?.full_name || playerId,
+                pos: player?.position || null,
+                team: player?.team || null,
+                exposure_pct: playerExposure.pct,
+              });
+              targetScore += playerExposure.pct;
+            }
+          }
+        }
+
+        // Sort matched assets by exposure percentage
+        matchedAssets.sort((a, b) => b.exposure_pct - a.exposure_pct);
+
+        targets.push({
+          opponent_username: oppUsername,
+          opponent_display_name: oppUser.display_name || oppCachedUser?.display_name || null,
+          target_score: Math.round(targetScore * 100) / 100,
+          matched_assets: matchedAssets.slice(0, 5),
+          meta: {
+            active_league_count: exposureProfile?.active_league_count || 0,
+            last_synced_at: exposureProfile?.last_synced_at || null,
+            is_partial: !exposureProfile || cache.isExposureStale(exposureProfile?.last_synced_at || null),
+          },
+        });
+      }
+
+      // Sort by target score descending
+      targets.sort((a, b) => b.target_score - a.target_score);
+
+      res.json({
+        league_id,
+        league_name: league.name,
+        season: league.season,
+        my_roster_id: myRoster.roster_id,
+        targets,
+      });
+    } catch (e) {
+      console.error("Targets error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // POST /api/exposure/sync - Sync exposure profile for a username
+  app.post("/api/exposure/sync", async (req, res) => {
+    try {
+      const { username } = req.query;
+      
+      if (!username || typeof username !== "string") {
+        return res.status(400).json({ message: "Username required" });
+      }
+
+      // Fetch user from Sleeper API
+      const userResp = await sleeperQueue.add(() => 
+        fetch(`https://api.sleeper.app/v1/user/${username}`)
+      );
+      if (!userResp.ok) {
+        return res.status(404).json({ message: "User not found on Sleeper" });
+      }
+      const sleeperUser = await userResp.json();
+      const userId = sleeperUser.user_id;
+
+      // Get current NFL season (approximate)
+      const currentYear = new Date().getFullYear();
+      const currentMonth = new Date().getMonth();
+      const season = currentMonth >= 2 ? currentYear : currentYear - 1;
+
+      // Fetch their active leagues for current season
+      const leaguesResp = await sleeperQueue.add(() =>
+        fetch(`https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${season}`)
+      );
+      if (!leaguesResp.ok) {
+        return res.status(500).json({ message: "Failed to fetch leagues" });
+      }
+      const leagues = await leaguesResp.json() as any[];
+
+      // Only count active leagues (status === "in_season" or "complete" for current season)
+      const activeLeagues = leagues.filter((l: any) => l.status !== "archived");
+      
+      // Collect player exposure across all active leagues
+      const playerCounts = new Map<string, { count: number; pos: string | null }>();
+
+      for (const league of activeLeagues) {
+        // Fetch rosters for this league
+        const rostersResp = await sleeperQueue.add(() =>
+          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
+        );
+        if (!rostersResp.ok) continue;
+        const rosters = await rostersResp.json() as any[];
+
+        // Find this user's roster
+        const myRoster = rosters.find((r: any) => r.owner_id === userId);
+        if (!myRoster || !myRoster.players) continue;
+
+        for (const playerId of myRoster.players) {
+          const existing = playerCounts.get(playerId);
+          if (existing) {
+            existing.count++;
+          } else {
+            // Get player position from cache
+            const player = await cache.getPlayer(playerId);
+            playerCounts.set(playerId, { count: 1, pos: player?.position || null });
+          }
+        }
+      }
+
+      // Calculate exposure percentages
+      const activeLeagueCount = activeLeagues.length;
+      const exposureJson: Record<string, { count: number; pct: number; pos: string | null }> = {};
+      
+      for (const [playerId, data] of playerCounts.entries()) {
+        exposureJson[playerId] = {
+          count: data.count,
+          pct: activeLeagueCount > 0 ? Math.round((data.count / activeLeagueCount) * 100) : 0,
+          pos: data.pos,
+        };
+      }
+
+      // Save to cache
+      await cache.upsertExposureProfile({
+        username: username.toLowerCase(),
+        season,
+        active_league_count: activeLeagueCount,
+        exposure_json: exposureJson,
+      });
+
+      res.json({
+        username: username.toLowerCase(),
+        season,
+        active_league_count: activeLeagueCount,
+        players_tracked: Object.keys(exposureJson).length,
+        synced_at: Date.now(),
+      });
+    } catch (e) {
+      console.error("Exposure sync error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });
