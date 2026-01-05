@@ -638,11 +638,14 @@ interface TargetMeta {
   active_league_count: number;
   last_synced_at: number | null;
   is_partial: boolean;
+  needs_sync: boolean;
+  has_valid_username: boolean;
 }
 
 interface TradeTarget {
   opponent_username: string;
   opponent_display_name: string | null;
+  opponent_user_id?: string;
   target_score: number;
   matched_assets: MatchedAsset[];
   meta: TargetMeta;
@@ -696,5 +699,50 @@ export function useExposureSync() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/targets"] });
     },
+  });
+}
+
+// Season summary types
+interface SeasonRecord {
+  wins: number;
+  losses: number;
+  ties: number;
+}
+
+interface SeasonSummary {
+  season: number;
+  league_id: string;
+  finish_place: number | null;
+  regular_rank: number | null;
+  playoff_finish: string | null;
+  record: SeasonRecord;
+  pf: number | null;
+  pa: number | null;
+}
+
+interface SeasonSummariesResponse {
+  group_id: string;
+  username: string;
+  seasons: SeasonSummary[];
+}
+
+// GET /api/group/:groupId/seasons - Get season-by-season summaries
+export function useSeasonSummaries(groupId: string | undefined, username: string | undefined) {
+  return useQuery<SeasonSummariesResponse>({
+    queryKey: ["/api/group", groupId, "seasons", username],
+    queryFn: async () => {
+      if (!groupId || !username) throw new Error("Group ID and username required");
+      const url = `/api/group/${encodeURIComponent(groupId)}/seasons?username=${encodeURIComponent(username)}`;
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("Not found");
+        throw new Error("Failed to fetch season summaries");
+      }
+      
+      return res.json();
+    },
+    enabled: !!groupId && !!username,
+    staleTime: 1000 * 60 * 10,
   });
 }

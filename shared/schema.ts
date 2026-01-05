@@ -168,6 +168,27 @@ export const user_exposure_summary = pgTable("user_exposure_summary", {
   index("idx_exposure_season").on(table.season),
 ]);
 
+// League season summary for year-by-year finish tracking
+export const league_season_summary = pgTable("league_season_summary", {
+  league_id: text("league_id").notNull(),
+  user_id: text("user_id").notNull(),
+  season: integer("season").notNull(),
+  roster_id: integer("roster_id"),
+  finish_place: integer("finish_place"), // null if unknown
+  regular_rank: integer("regular_rank"), // regular season standing
+  playoff_finish: text("playoff_finish"), // "Champion", "Runner-up", "3rd", "Missed playoffs", etc
+  wins: integer("wins").notNull().default(0),
+  losses: integer("losses").notNull().default(0),
+  ties: integer("ties").notNull().default(0),
+  pf: real("pf"), // points for
+  pa: real("pa"), // points against
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.league_id, table.user_id] }),
+  index("idx_season_summary_user").on(table.user_id),
+  index("idx_season_summary_season").on(table.season),
+]);
+
 // Sleeper user schema
 export const sleeperUserSchema = z.object({
   user_id: z.string(),

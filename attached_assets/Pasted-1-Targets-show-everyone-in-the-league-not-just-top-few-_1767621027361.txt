@@ -1,0 +1,183 @@
+1) Targets: show everyone in the league (not just top few)
+
+Right now it’s almost certainly doing one of these:
+
+targets.slice(0, 3) / LIMIT 3 / topN=3
+
+or only computing targets for opponents who already have an exposure profile cached (aka “usernames you’ve typed before”)
+
+What you want
+
+Default: rank ALL league mates (excluding you)
+
+Display: show top 3–5 initially for speed, but add “Show all (N)” to expand in the same modal.
+
+If an opponent doesn’t have an exposure profile yet: compute it on the fly (queued + concurrency cap), don’t exclude them.
+
+Agent instructions
+TARGETS MODAL FIXES
+
+A) Always include all league mates by default
+- Source opponent list ONLY from league membership:
+  GET /league/<league_id>/users + rosters mapping
+  opponents = all users in that league except username A
+- Do NOT build opponent list from previously searched usernames.
+
+B) Compute targets for everyone
+- For each opponent:
+  if exposure profile missing or stale -> enqueue exposure sync job
+  still render opponent row immediately with status chip:
+    "Building profile..." (spinner) until exposure arrives
+- Once exposure computed, update that opponent row in-place.
+
+C) UI: show top few by default but allow expand
+- Modal should render:
+   - TopTargets section (top 5)
+   - Button: "Show all (N)" -> expands full ranked list
+   - Search box to filter opponent username
+- Do not restrict results in API with LIMIT.
+Return full list from /api/targets and paginate client-side if needed.
+
+
+Implementation note: if you’re worried about slowness, do progressive rendering:
+
+render list of opponents instantly
+
+fill in scores as exposure profiles become available
+
+2) Draft Capital: clarify what it means (and fix scope)
+
+Your confusion is valid because “Draft Capital” can mean 3 different things:
+
+Picks currently owned (future picks only)
+
+This year’s draft picks (2025 only)
+
+All picks across all years owned (2025–2028 etc)
+
+Most people mean #1 + #3: current ownership of future picks (not all-time traded history).
+
+What you should display
+
+Default: Current Pick Ownership (Future Picks)
+(e.g., 2025–2028 picks you currently control in the latest league instance)
+
+Toggle: “Only 2025” vs “All future years”
+
+Agent instructions
+DRAFT CAPITAL CLARITY + SCOPE
+
+A) Rename the tab title to:
+  "Draft Capital (Current Pick Ownership)"
+
+B) Add a scope label on the page:
+  "Shows picks currently owned in the latest league instance (includes future years)."
+
+C) Add filter toggles:
+  - Years: [2025 only] [All future years] (default All future)
+  - Rounds: (optional) R1–R4 (keep current)
+
+D) Ensure the dataset is NOT “all-time picks traded”
+- Use league/<id>/traded_picks applied to current ownership.
+- Do NOT traverse previous_league_id history for this tab unless user selects History mode.
+
+
+If you later want “all-time pick movement,” that belongs in the Market/Trends tab, not Draft Capital.
+
+3) Year-by-year finish (placement) per league, dropdown defaulting to most recent
+
+You’re missing the crucial “legacy flex” metric:
+
+“What place did you finish each season?” (and champion counts)
+
+This is doable because Sleeper league chains are linked via previous_league_id and/or league_id per season.
+
+What you want (UX)
+
+On each league tile: show overall record (already) + # titles / best finish (optional)
+
+Inside league detail: dropdown Season (most recent selected by default)
+
+Show: finish place, record, PF/PA, playoff result (if derivable)
+
+How to compute finish
+
+For each season’s league instance:
+
+Pull standings via:
+
+rosters endpoint has settings that often include wins/losses and points
+
+final rank is usually roster.settings.rank / playoff_rank / final_rank depending on sport + season
+
+if rank field is missing, fallback: compute by playoff bracket outcome if available, else regular season standings
+
+Agent instructions
+SEASON-BY-SEASON FINISH (PLACEMENT) FOR EACH LEAGUE GROUP
+
+A) Data model
+Create table: league_season_summary
+- group_id TEXT
+- league_id TEXT
+- season INT
+- username TEXT
+- roster_id INT
+- finish_place INT NULL
+- regular_rank INT NULL
+- playoff_finish TEXT NULL (e.g., "Champion", "Runner-up", "3rd", "Missed playoffs")
+- wins INT, losses INT, ties INT
+- pf NUMERIC, pa NUMERIC
+- updated_at TIMESTAMP
+PK: (league_id, username)
+
+B) Build the season chain
+- For each league group tile, you already have:
+  latest_league_id + previous links.
+- Traverse previous_league_id until null (cap at ~10 seasons).
+- Store mapping league_id -> season
+
+C) Populate season summary
+For each league_id in chain:
+- fetch rosters + users
+- find roster_id for username
+- capture W/L/T, PF/PA from roster.settings
+- Determine finish_place:
+   1) use roster.settings.playoff_rank or roster.settings.rank if it exists
+   2) else use league standings ordering if provided
+   3) else leave null and label as "Unknown" (don’t fake it)
+
+D) UI in League detail
+- Add a Season dropdown at top-right:
+   default selected = most recent season (latest)
+- Below, show a “Season Result” card:
+   Finish: 2nd | Record: 11-3 | PF: 1,742 | PA: 1,508
+- Add a “History” expandable table:
+   Season | Finish | Record | PF | PA
+
+
+Key rule: don’t hallucinate finish_place. If you can’t derive it reliably, show “Unknown” and keep it honest.
+
+One combined “agent prompt” you can paste (short + forceful)
+Make these fixes:
+
+1) Targets modal must include ALL league mates by default (not only previously searched usernames).
+- Opponents list must come from /league/<league_id>/users + rosters mapping.
+- Compute targets for every opponent (exclude username A).
+- If opponent exposure profile missing/stale: enqueue sync + render row with "Building profile…" and update in place.
+- Remove any LIMIT/topN restriction server-side.
+- UI: show Top 5 initially + “Show all (N)” expand + search filter.
+
+2) Draft Capital clarity:
+- Rename to “Draft Capital (Current Pick Ownership)”
+- Add scope label: “Latest league instance; shows picks currently owned; includes future years.”
+- Add toggle: [2025 only] vs [All future years] (default All future)
+- Confirm it is NOT traversing history or counting all-time traded picks.
+
+3) Add year-by-year season finish:
+- Traverse previous_league_id chain for each league group (cap 10 seasons).
+- Build league_season_summary table keyed by league_id + username.
+- Store per season: finish_place (if available), record, PF/PA.
+- UI: add Season dropdown (default most recent) + a History table: Season | Finish | Record | PF | PA.
+- If finish_place cannot be derived reliably, display “Unknown” (do not guess).
+
+Keep changes minimal; reuse existing DB/cache patterns and styling.

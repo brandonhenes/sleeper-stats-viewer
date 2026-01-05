@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw, AlertCircle, Target } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Loader2, RefreshCw, AlertCircle, Target, Search, ChevronDown, ChevronUp } from "lucide-react";
 import { useTradeTargets, useExposureSync } from "@/hooks/use-sleeper";
 
 interface TradeTargetsModalProps {
@@ -23,6 +24,8 @@ export function TradeTargetsModal({
   const { data, isLoading, error, refetch } = useTradeTargets(username, leagueId);
   const exposureSync = useExposureSync();
   const [syncingUsers, setSyncingUsers] = useState<Set<string>>(new Set());
+  const [showAll, setShowAll] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const handleSyncUser = async (oppUsername: string) => {
     setSyncingUsers(prev => new Set(prev).add(oppUsername));
@@ -48,6 +51,18 @@ export function TradeTargetsModal({
     return `${Math.floor(hours / 24)}d ago`;
   };
 
+  const filteredTargets = useMemo(() => {
+    if (!data?.targets) return [];
+    const query = searchQuery.toLowerCase();
+    return data.targets.filter(t => 
+      t.opponent_username.toLowerCase().includes(query) ||
+      (t.opponent_display_name?.toLowerCase().includes(query) ?? false)
+    );
+  }, [data?.targets, searchQuery]);
+
+  const displayedTargets = showAll ? filteredTargets : filteredTargets.slice(0, 5);
+  const hasMore = filteredTargets.length > 5;
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" data-testid="modal-trade-targets">
@@ -56,16 +71,29 @@ export function TradeTargetsModal({
             <Target className="w-5 h-5" />
             Trade Targets
             {leagueName && (
-              <span className="text-muted-foreground font-normal">
+              <span className="text-muted-foreground font-normal text-base">
                 in {leagueName}
               </span>
             )}
           </DialogTitle>
         </DialogHeader>
 
-        <p className="text-sm text-muted-foreground mb-4">
-          Opponents ranked by how much they want players on your roster (based on their cross-league exposure).
+        <p className="text-sm text-muted-foreground mb-3">
+          All league opponents ranked by interest in your players (based on their cross-league exposure).
         </p>
+
+        {data && data.targets.length > 0 && (
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search opponents..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+              data-testid="input-search-targets"
+            />
+          </div>
+        )}
 
         {isLoading && (
           <div className="flex items-center justify-center py-8" data-testid="targets-loading">
@@ -82,16 +110,13 @@ export function TradeTargetsModal({
 
         {data && data.targets.length === 0 && (
           <div className="text-center py-8 text-muted-foreground" data-testid="targets-empty">
-            <p>No targeting data available yet.</p>
-            <p className="text-sm mt-2">
-              Click the sync button next to opponents to build their exposure profiles.
-            </p>
+            <p>No opponents found in this league.</p>
           </div>
         )}
 
-        {data && data.targets.length > 0 && (
-          <div className="space-y-4">
-            {data.targets.slice(0, 8).map((target, idx) => (
+        {data && displayedTargets.length > 0 && (
+          <div className="space-y-3">
+            {displayedTargets.map((target, idx) => (
               <div
                 key={target.opponent_username}
                 className="border rounded-md p-3"
@@ -109,18 +134,21 @@ export function TradeTargetsModal({
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {target.meta.is_partial ? (
-                        <span className="text-amber-500">Partial</span>
-                      ) : (
-                        formatSyncTime(target.meta.last_synced_at)
-                      )}
-                    </span>
+                    {target.meta.needs_sync ? (
+                      <span className="text-xs text-amber-500">
+                        {syncingUsers.has(target.opponent_username) ? "Building..." : "Needs sync"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        {formatSyncTime(target.meta.last_synced_at)}
+                      </span>
+                    )}
                     <Button
                       size="icon"
                       variant="ghost"
                       onClick={() => handleSyncUser(target.opponent_username)}
-                      disabled={syncingUsers.has(target.opponent_username)}
+                      disabled={syncingUsers.has(target.opponent_username) || !target.meta.has_valid_username}
+                      title={!target.meta.has_valid_username ? "Username not synced yet" : "Refresh exposure profile"}
                       data-testid={`button-sync-${target.opponent_username}`}
                     >
                       {syncingUsers.has(target.opponent_username) ? (
@@ -151,14 +179,38 @@ export function TradeTargetsModal({
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    {target.meta.active_league_count === 0
-                      ? "No exposure profile - click sync to build"
+                    {target.meta.needs_sync
+                      ? "Click sync to build exposure profile"
                       : "No matching players found"}
                   </p>
                 )}
               </div>
             ))}
           </div>
+        )}
+
+        {hasMore && !showAll && (
+          <Button
+            variant="ghost"
+            className="w-full mt-2 gap-2"
+            onClick={() => setShowAll(true)}
+            data-testid="button-show-all-targets"
+          >
+            <ChevronDown className="w-4 h-4" />
+            Show all ({filteredTargets.length})
+          </Button>
+        )}
+
+        {showAll && hasMore && (
+          <Button
+            variant="ghost"
+            className="w-full mt-2 gap-2"
+            onClick={() => setShowAll(false)}
+            data-testid="button-collapse-targets"
+          >
+            <ChevronUp className="w-4 h-4" />
+            Show less
+          </Button>
         )}
 
         <div className="flex justify-end mt-4">

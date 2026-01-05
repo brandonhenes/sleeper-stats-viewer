@@ -67,6 +67,7 @@ Preferred communication style: Simple, everyday language.
 - `GET /api/league/:leagueId/churn?username=<username>` - Returns roster churn rate and league ranking
 - `GET /api/league/:leagueId/trade-timing?username=<username>` - Returns trade timing analysis by season phase
 - `GET /api/league/:leagueId/all-play?username=<username>` - Returns all-play record and luck index
+- `GET /api/group/:groupId/seasons?username=<username>` - Returns season-by-season finish history with records, ranks, and playoff results
 
 ### Frontend Routes
 - `/` - Home page with username search
@@ -108,6 +109,14 @@ Preferred communication style: Simple, everyday language.
 - `SESSION_SECRET`: Session secret for authentication (if needed)
 
 ## Recent Changes
+
+### January 5, 2026 (Phase 2.3 Season History)
+- **Season History Section**: New UI section on league group details showing season-by-season placement history
+- **Season Summaries API**: `GET /api/group/:groupId/seasons?username=<username>` endpoint auto-builds and caches season summaries from roster data
+- **Database Schema**: Added `league_season_summary` table with finish_place, regular_rank, playoff_finish, wins/losses/ties, pf/pa fields
+- **Season Dropdown**: Selector to navigate between seasons with detailed stats for selected season (record, rank, points, playoff result)
+- **All Seasons Table**: Displays complete history with highlighting for selected season
+- **Auto-calculation**: Regular season rank calculated by sorting rosters by wins then PF; playoff finish derived from rank
 
 ### January 5, 2026 (Phase 2.2 UX Enhancements - Latest League Resolution and Debug)
 - **Cache Utilities**: Added resolveLatestLeagueId helper for chain traversal, TTL constants (ROSTERS_TTL=15min, TRADES_TTL=6hr), isStale helper methods

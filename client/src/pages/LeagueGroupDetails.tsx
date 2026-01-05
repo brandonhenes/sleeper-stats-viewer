@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "wouter";
-import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, useTradeTiming, useAllPlay } from "@/hooks/use-sleeper";
+import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, useTradeTiming, useAllPlay, useSeasonSummaries } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,11 +44,19 @@ export default function LeagueGroupDetails() {
   
   // Churn timeframe state: "season", "last30", "lifetime"
   const [churnTimeframe, setChurnTimeframe] = useState<string>("season");
+  // Draft capital year filter: "all" or "current"
+  const [draftCapitalYearFilter, setDraftCapitalYearFilter] = useState<string>("all");
   
   const { data: draftCapitalData, isLoading: draftCapitalLoading } = useDraftCapital(latestLeagueId, username);
   const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username, churnTimeframe, groupId);
   const { data: tradeTimingData, isLoading: tradeTimingLoading } = useTradeTiming(latestLeagueId, username);
   const { data: allPlayData, isLoading: allPlayLoading } = useAllPlay(latestLeagueId, username);
+  const { data: seasonData, isLoading: seasonLoading } = useSeasonSummaries(groupId, username);
+  
+  // Selected season for detailed view - default to most recent
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const displayedSeason = selectedSeason ?? seasonData?.seasons[0]?.season ?? null;
+  const selectedSeasonData = seasonData?.seasons.find(s => s.season === displayedSeason);
 
   const backLink = username ? `/u/${username}` : "/";
 
@@ -332,10 +340,33 @@ export default function LeagueGroupDetails() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Draft Capital Card */}
               <Card className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Layers className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-bold">Draft Capital</h3>
+                <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <Layers className="w-5 h-5 text-primary" />
+                    <h3 className="text-lg font-bold">Current Pick Ownership</h3>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant={draftCapitalYearFilter === "current" ? "default" : "ghost"}
+                      size="sm"
+                      onClick={() => setDraftCapitalYearFilter("current")}
+                      data-testid="button-draft-capital-current"
+                    >
+                      {new Date().getFullYear()} Only
+                    </Button>
+                    <Button
+                      variant={draftCapitalYearFilter === "all" ? "default" : "ghost"}
+                      size="sm"
+                      onClick={() => setDraftCapitalYearFilter("all")}
+                      data-testid="button-draft-capital-all"
+                    >
+                      All Future
+                    </Button>
+                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Picks currently owned in the latest league instance (includes future years from trades).
+                </p>
                 
                 {draftCapitalLoading && (
                   <div className="flex items-center justify-center py-8">
@@ -357,7 +388,14 @@ export default function LeagueGroupDetails() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {Object.entries(draftCapitalData.picks_by_year).map(([year, rounds]: [string, any]) => (
+                          {Object.entries(draftCapitalData.picks_by_year)
+                            .filter(([year]) => {
+                              if (draftCapitalYearFilter === "current") {
+                                return parseInt(year, 10) === new Date().getFullYear();
+                              }
+                              return true;
+                            })
+                            .map(([year, rounds]: [string, any]) => (
                             <TableRow key={year}>
                               <TableCell className="font-mono text-muted-foreground">{year}</TableCell>
                               <TableCell className="text-center">
@@ -754,6 +792,124 @@ export default function LeagueGroupDetails() {
 
           {/* Trade Assets Section - Phase 2 */}
           <TradesSection groupId={groupId} leagueId={latestLeagueId} username={username} />
+
+          {/* Season History Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.4 }}
+          >
+            <Card className="p-6 mt-6">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <History className="w-5 h-5 text-primary" />
+                  <h2 className="text-lg font-semibold">Season History</h2>
+                </div>
+                {seasonData?.seasons && seasonData.seasons.length > 0 && (
+                  <select
+                    className="px-3 py-1.5 rounded-md border bg-background text-sm"
+                    value={displayedSeason ?? ""}
+                    onChange={(e) => setSelectedSeason(e.target.value ? parseInt(e.target.value) : null)}
+                    data-testid="select-season-history"
+                  >
+                    {seasonData.seasons.map(s => (
+                      <option key={s.season} value={s.season}>{s.season}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              
+              {seasonLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : !seasonData?.seasons || seasonData.seasons.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No season data available yet
+                </div>
+              ) : selectedSeasonData ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="text-center p-3 rounded-md bg-muted/30">
+                      <div className="text-2xl font-bold">
+                        {selectedSeasonData.record.wins}-{selectedSeasonData.record.losses}
+                        {selectedSeasonData.record.ties > 0 && `-${selectedSeasonData.record.ties}`}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Record</div>
+                    </div>
+                    <div className="text-center p-3 rounded-md bg-muted/30">
+                      <div className="text-2xl font-bold">
+                        {selectedSeasonData.regular_rank ? `#${selectedSeasonData.regular_rank}` : "-"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Regular Season Rank</div>
+                    </div>
+                    <div className="text-center p-3 rounded-md bg-muted/30">
+                      <div className="text-2xl font-bold">
+                        {selectedSeasonData.finish_place ? `#${selectedSeasonData.finish_place}` : "-"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Final Finish</div>
+                    </div>
+                    <div className="text-center p-3 rounded-md bg-muted/30">
+                      <div className="text-2xl font-bold">
+                        {selectedSeasonData.pf?.toFixed(1) ?? "-"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Points For</div>
+                    </div>
+                  </div>
+                  
+                  {selectedSeasonData.playoff_finish && (
+                    <div className="flex items-center justify-center">
+                      <Badge variant={selectedSeasonData.playoff_finish === "Champion" ? "default" : "secondary"}>
+                        {selectedSeasonData.playoff_finish === "Champion" && <Trophy className="w-3 h-3 mr-1" />}
+                        {selectedSeasonData.playoff_finish}
+                      </Badge>
+                    </div>
+                  )}
+                  
+                  {seasonData.seasons.length > 1 && (
+                    <div className="mt-6 border-t pt-4">
+                      <h3 className="text-sm font-medium mb-3 text-muted-foreground">All Seasons</h3>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Season</TableHead>
+                            <TableHead>Record</TableHead>
+                            <TableHead>Rank</TableHead>
+                            <TableHead>PF</TableHead>
+                            <TableHead>Result</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {seasonData.seasons.map((s) => (
+                            <TableRow 
+                              key={s.season} 
+                              className={s.season === displayedSeason ? "bg-muted/50" : ""}
+                              data-testid={`row-season-${s.season}`}
+                            >
+                              <TableCell className="font-medium">{s.season}</TableCell>
+                              <TableCell>
+                                {s.record.wins}-{s.record.losses}
+                                {s.record.ties > 0 && `-${s.record.ties}`}
+                              </TableCell>
+                              <TableCell>{s.regular_rank ? `#${s.regular_rank}` : "-"}</TableCell>
+                              <TableCell>{s.pf?.toFixed(1) ?? "-"}</TableCell>
+                              <TableCell>
+                                {s.playoff_finish && (
+                                  <Badge variant={s.playoff_finish === "Champion" ? "default" : "outline"}>
+                                    {s.playoff_finish}
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </Card>
+          </motion.div>
           
           {/* Debug Panel */}
           {isDebug && leagueGroup && (

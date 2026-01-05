@@ -1432,6 +1432,7 @@ export async function registerRoutes(
       const targets: Array<{
         opponent_username: string;
         opponent_display_name: string | null;
+        opponent_user_id: string;
         target_score: number;
         matched_assets: Array<{
           player_id: string;
@@ -1444,6 +1445,8 @@ export async function registerRoutes(
           active_league_count: number;
           last_synced_at: number | null;
           is_partial: boolean;
+          needs_sync: boolean;
+          has_valid_username: boolean;
         };
       }> = [];
 
@@ -1451,17 +1454,19 @@ export async function registerRoutes(
         // Skip my own roster
         if (roster.owner_id === userId) continue;
 
-        // Find opponent's username from league_users
+        // Find opponent's info from league_users
         const oppUser = leagueUsers.find(u => u.user_id === roster.owner_id);
         if (!oppUser) continue;
 
-        // Get opponent's cached user info for username
+        // Try to get cached user info, but don't skip if missing
         const oppCachedUser = await cache.getUserById(roster.owner_id);
-        const oppUsername = oppCachedUser?.username;
-        if (!oppUsername) continue;
+        // Use cached username if available, otherwise use display_name as fallback identifier
+        const oppUsername = oppCachedUser?.username || oppUser.display_name || `user_${roster.owner_id}`;
+        const hasValidUsername = !!oppCachedUser?.username;
 
-        // Get opponent's exposure profile
-        const exposureProfile = await cache.getExposureProfile(oppUsername);
+        // Get opponent's exposure profile (only if we have a valid username)
+        const exposureProfile = hasValidUsername ? await cache.getExposureProfile(oppUsername) : null;
+        const needsSync = !hasValidUsername || !exposureProfile || cache.isExposureStale(exposureProfile?.last_synced_at || null);
         
         const matchedAssets: Array<{
           player_id: string;
@@ -1496,12 +1501,15 @@ export async function registerRoutes(
         targets.push({
           opponent_username: oppUsername,
           opponent_display_name: oppUser.display_name || oppCachedUser?.display_name || null,
+          opponent_user_id: roster.owner_id,
           target_score: Math.round(targetScore * 100) / 100,
           matched_assets: matchedAssets.slice(0, 5),
           meta: {
             active_league_count: exposureProfile?.active_league_count || 0,
             last_synced_at: exposureProfile?.last_synced_at || null,
-            is_partial: !exposureProfile || cache.isExposureStale(exposureProfile?.last_synced_at || null),
+            is_partial: needsSync,
+            needs_sync: needsSync,
+            has_valid_username: hasValidUsername,
           },
         });
       }
@@ -1604,6 +1612,124 @@ export async function registerRoutes(
       });
     } catch (e) {
       console.error("Exposure sync error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/group/:groupId/seasons - Get year-by-year season summaries for a league group
+  app.get("/api/group/:groupId/seasons", async (req, res) => {
+    try {
+      const { groupId } = req.params;
+      const username = req.query.username as string;
+      
+      if (!username) {
+        return res.status(400).json({ message: "username required" });
+      }
+
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const userId = cachedUser.user_id;
+
+      // Get all leagues in this group for this user
+      const userLeagues = await cache.getLeaguesForUser(userId);
+      const groupLeagues = userLeagues.filter(l => l.group_id === groupId || l.league_id === groupId);
+      
+      if (groupLeagues.length === 0) {
+        return res.status(404).json({ message: "League group not found" });
+      }
+
+      const leagueIds = groupLeagues.map(l => l.league_id);
+      
+      // Check if we have cached summaries
+      let summaries = await cache.getSeasonSummaries(leagueIds, userId);
+      
+      // If no summaries or missing some, build them
+      if (summaries.length < leagueIds.length) {
+        const existingLeagueIds = new Set(summaries.map(s => s.league_id));
+        const missingLeagueIds = leagueIds.filter(id => !existingLeagueIds.has(id));
+        
+        // Build summaries for missing leagues
+        for (const leagueId of missingLeagueIds) {
+          const league = groupLeagues.find(l => l.league_id === leagueId);
+          if (!league) continue;
+
+          // Get rosters to find user's stats
+          const rosters = await cache.getRostersForLeague(leagueId);
+          const userRoster = rosters.find(r => r.owner_id === userId);
+          
+          if (!userRoster) continue;
+
+          // Extract stats directly from cached roster
+          const wins = userRoster.wins ?? 0;
+          const losses = userRoster.losses ?? 0;
+          const ties = userRoster.ties ?? 0;
+          const pf = userRoster.fpts ?? null;
+          const pa = userRoster.fpts_against ?? null;
+          
+          // Calculate regular season rank by sorting rosters by wins, then PF
+          const sortedRosters = [...rosters].sort((a, b) => {
+            const aWins = a.wins ?? 0;
+            const bWins = b.wins ?? 0;
+            if (bWins !== aWins) return bWins - aWins;
+            const aPf = a.fpts ?? 0;
+            const bPf = b.fpts ?? 0;
+            return bPf - aPf;
+          });
+          const regularRank = sortedRosters.findIndex(r => r.roster_id === userRoster.roster_id) + 1;
+          
+          // Finish place is calculated rank (we don't have playoff data in cache)
+          const finishPlace = regularRank > 0 ? regularRank : null;
+          
+          // Playoff finish text based on rank
+          let playoffFinish: string | null = null;
+          if (finishPlace === 1) playoffFinish = "Champion";
+          else if (finishPlace === 2) playoffFinish = "Runner-up";
+          else if (finishPlace === 3) playoffFinish = "3rd";
+          else if (finishPlace !== null && finishPlace <= 4) playoffFinish = "4th";
+          else if (finishPlace !== null) playoffFinish = "Unknown";
+
+          // Save to cache
+          await cache.upsertSeasonSummary({
+            league_id: leagueId,
+            user_id: userId,
+            season: league.season ?? 0,
+            roster_id: userRoster.roster_id,
+            finish_place: finishPlace,
+            regular_rank: regularRank,
+            playoff_finish: playoffFinish,
+            wins,
+            losses,
+            ties,
+            pf: pf !== null ? Number(pf) : null,
+            pa: pa !== null ? Number(pa) : null,
+          });
+        }
+        
+        // Re-fetch all summaries after building
+        summaries = await cache.getSeasonSummaries(leagueIds, userId);
+      }
+
+      // Sort by season descending
+      summaries.sort((a, b) => b.season - a.season);
+
+      res.json({
+        group_id: groupId,
+        username,
+        seasons: summaries.map(s => ({
+          season: s.season,
+          league_id: s.league_id,
+          finish_place: s.finish_place,
+          regular_rank: s.regular_rank,
+          playoff_finish: s.playoff_finish,
+          record: { wins: s.wins, losses: s.losses, ties: s.ties },
+          pf: s.pf,
+          pa: s.pa,
+        })),
+      });
+    } catch (e) {
+      console.error("Season summaries error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

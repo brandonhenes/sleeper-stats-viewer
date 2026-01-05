@@ -1015,6 +1015,93 @@ export const cache = {
     if (!lastSyncedAt) return true;
     return Date.now() - lastSyncedAt > TTL.EXPOSURE;
   },
+
+  // League season summary methods for year-by-year finish tracking
+  async getSeasonSummaries(leagueIds: string[], userId: string): Promise<Array<{
+    league_id: string;
+    user_id: string;
+    season: number;
+    roster_id: number | null;
+    finish_place: number | null;
+    regular_rank: number | null;
+    playoff_finish: string | null;
+    wins: number;
+    losses: number;
+    ties: number;
+    pf: number | null;
+    pa: number | null;
+  }>> {
+    if (leagueIds.length === 0) return [];
+    const result = await db.select()
+      .from(schema.league_season_summary)
+      .where(and(
+        inArray(schema.league_season_summary.league_id, leagueIds),
+        eq(schema.league_season_summary.user_id, userId)
+      ));
+    return result.map(r => ({
+      league_id: r.league_id,
+      user_id: r.user_id,
+      season: r.season,
+      roster_id: r.roster_id,
+      finish_place: r.finish_place,
+      regular_rank: r.regular_rank,
+      playoff_finish: r.playoff_finish,
+      wins: r.wins,
+      losses: r.losses,
+      ties: r.ties,
+      pf: r.pf,
+      pa: r.pa,
+    }));
+  },
+
+  async upsertSeasonSummary(data: {
+    league_id: string;
+    user_id: string;
+    season: number;
+    roster_id?: number | null;
+    finish_place?: number | null;
+    regular_rank?: number | null;
+    playoff_finish?: string | null;
+    wins: number;
+    losses: number;
+    ties: number;
+    pf?: number | null;
+    pa?: number | null;
+  }): Promise<void> {
+    const now = Date.now();
+    await db.insert(schema.league_season_summary)
+      .values({
+        league_id: data.league_id,
+        user_id: data.user_id,
+        season: data.season,
+        roster_id: data.roster_id ?? null,
+        finish_place: data.finish_place ?? null,
+        regular_rank: data.regular_rank ?? null,
+        playoff_finish: data.playoff_finish ?? null,
+        wins: data.wins,
+        losses: data.losses,
+        ties: data.ties,
+        pf: data.pf ?? null,
+        pa: data.pa ?? null,
+        updated_at: now,
+      })
+      .onConflictDoUpdate({
+        target: [schema.league_season_summary.league_id, schema.league_season_summary.user_id],
+        set: {
+          season: data.season,
+          roster_id: data.roster_id ?? null,
+          finish_place: data.finish_place ?? null,
+          regular_rank: data.regular_rank ?? null,
+          playoff_finish: data.playoff_finish ?? null,
+          wins: data.wins,
+          losses: data.losses,
+          ties: data.ties,
+          pf: data.pf ?? null,
+          pa: data.pa ?? null,
+          updated_at: now,
+        },
+      });
+  },
 };
 
 export default cache;
