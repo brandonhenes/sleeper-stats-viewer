@@ -1,15 +1,20 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useParams } from "wouter";
+import { useParams, useSearch } from "wouter";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from "wouter";
-import { TrendingUp, Users, Calendar, Package, Loader2, RefreshCw } from "lucide-react";
+import { TrendingUp, Users, Calendar, Package, Loader2, RefreshCw, Clock, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Layout } from "@/components/Layout";
+
+type Timeframe = '7d' | '30d' | 'season' | 'all';
+type Scope = 'active' | 'all';
 
 interface MarketTrends {
   totals: {
@@ -32,11 +37,25 @@ interface MarketTrends {
     player_count: number;
     pick_count: number;
   }[];
+  debug?: {
+    timeframe: string;
+    scope: string;
+    date_from: string | null;
+    date_to: string;
+    leagues_count: number | string;
+    season_filter: number | null;
+  };
 }
 
-function useMarketTrends(enabled: boolean) {
+function useMarketTrends(username: string, timeframe: Timeframe, scope: Scope, enabled: boolean) {
   return useQuery<MarketTrends>({
-    queryKey: ["/api/market/trends"],
+    queryKey: ["/api/market/trends", username, timeframe, scope],
+    queryFn: async () => {
+      const params = new URLSearchParams({ timeframe, scope, username });
+      const res = await fetch(`/api/market/trends?${params}`);
+      if (!res.ok) throw new Error('Failed to load market trends');
+      return res.json();
+    },
     enabled,
   });
 }
@@ -53,13 +72,27 @@ function useMarketSync(username: string) {
   });
 }
 
+const TIMEFRAME_LABELS: Record<Timeframe, string> = {
+  '7d': '7 Days',
+  '30d': '30 Days',
+  'season': 'This Season',
+  'all': 'All Time',
+};
+
 export default function Market() {
   const { username } = useParams<{ username: string }>();
+  const searchParams = useSearch();
+  const isDebug = searchParams.includes('debug=1');
+  
   const [hasSynced, setHasSynced] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [timeframe, setTimeframe] = useState<Timeframe>('30d');
+  const [includeHistory, setIncludeHistory] = useState(false);
+  
+  const scope: Scope = includeHistory ? 'all' : 'active';
   
   const syncMutation = useMarketSync(username || "");
-  const { data, isLoading, error, refetch } = useMarketTrends(hasSynced && !syncError);
+  const { data, isLoading, error, refetch } = useMarketTrends(username || "", timeframe, scope, hasSynced && !syncError);
 
   useEffect(() => {
     if (username && !hasSynced && !syncMutation.isPending && !syncError) {
@@ -169,6 +202,7 @@ export default function Market() {
   }
 
   const { totals, most_traded_players, most_traded_picks, by_season } = data;
+  const debugInfo = data.debug;
 
   return (
     <Layout username={username}>
@@ -193,6 +227,71 @@ export default function Market() {
             Refresh
           </Button>
         </div>
+        
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Clock className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground mr-2">Window:</span>
+                {(['7d', '30d', 'season', 'all'] as Timeframe[]).map((tf) => (
+                  <Button
+                    key={tf}
+                    variant={timeframe === tf ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setTimeframe(tf)}
+                    data-testid={`button-timeframe-${tf}`}
+                  >
+                    {TIMEFRAME_LABELS[tf]}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="include-history"
+                  checked={includeHistory}
+                  onCheckedChange={setIncludeHistory}
+                  data-testid="switch-include-history"
+                />
+                <Label htmlFor="include-history" className="text-sm">
+                  Include History
+                </Label>
+              </div>
+            </div>
+            {debugInfo?.date_from && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Showing trades from {debugInfo.date_from} to {debugInfo.date_to}
+                {debugInfo.leagues_count !== 'all' && ` (${debugInfo.leagues_count} active leagues)`}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        
+        {isDebug && debugInfo && (
+          <Card className="border-dashed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Debug Info</CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs font-mono space-y-1">
+              <p>Timeframe: {debugInfo.timeframe}</p>
+              <p>Scope: {debugInfo.scope}</p>
+              <p>Date range: {debugInfo.date_from || 'all'} → {debugInfo.date_to}</p>
+              <p>Leagues: {debugInfo.leagues_count}</p>
+              <p>Season filter: {debugInfo.season_filter || 'none'}</p>
+            </CardContent>
+          </Card>
+        )}
+        
+        {totals.total === 0 && (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <p className="text-muted-foreground">
+                No trades found for this timeframe.
+                {!includeHistory && " Try including historical leagues or expanding the time window."}
+              </p>
+            </CardContent>
+          </Card>
+        )}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

@@ -257,12 +257,16 @@ export function useDraftCapital(leagueId: string | undefined, username: string |
 
 // GET /api/league/:leagueId/churn?username=...&timeframe=... - Get churn stats for a league
 // timeframe: "season" (default), "last30", "lifetime"
-export function useChurnStats(leagueId: string | undefined, username: string | undefined, timeframe: string = "season") {
+export function useChurnStats(leagueId: string | undefined, username: string | undefined, timeframe: string = "season", groupId?: string) {
   return useQuery({
-    queryKey: ["/api/league", leagueId, "churn", username, timeframe],
+    queryKey: ["/api/league", leagueId, "churn", username, timeframe, groupId],
     queryFn: async () => {
       if (!leagueId || !username) return null;
-      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/churn?username=${encodeURIComponent(username)}&timeframe=${encodeURIComponent(timeframe)}`);
+      let url = `/api/league/${encodeURIComponent(leagueId)}/churn?username=${encodeURIComponent(username)}&timeframe=${encodeURIComponent(timeframe)}`;
+      if (groupId && timeframe === "lifetime") {
+        url += `&groupId=${encodeURIComponent(groupId)}`;
+      }
+      const res = await fetch(url);
       
       if (!res.ok) {
         if (res.status === 404) return null;
@@ -522,6 +526,56 @@ export function useNormalizeTrades() {
     onSuccess: (_, leagueId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/league", leagueId, "trade-assets"] });
     },
+  });
+}
+
+// GET /api/group/:groupId/trade-assets - Trade assets for a league group with season filter
+export function useGroupTradeAssets(groupId: string | undefined, season?: number | 'all') {
+  return useQuery({
+    queryKey: ["/api/group", groupId, "trade-assets", season],
+    enabled: !!groupId,
+    queryFn: async () => {
+      if (!groupId) return null;
+      let url = `/api/group/${encodeURIComponent(groupId)}/trade-assets`;
+      if (season && season !== 'all') {
+        url += `?season=${season}`;
+      }
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch group trade assets");
+      }
+
+      return res.json() as Promise<{
+        group_id: string;
+        seasons: number[];
+        latest_season: number;
+        total_assets: number;
+        trades_count: number;
+        trades: Array<{
+          trade_id: string;
+          created_at_ms: number;
+          season: number;
+          league_id: string;
+          participants: number[];
+          assets: Array<{
+            roster_id: number;
+            direction: string;
+            asset_type: string;
+            asset_key: string;
+            asset_name: string | null;
+          }>;
+        }>;
+        debug?: {
+          leagues_count: number;
+          season_filter: number | null;
+          default_season: number;
+        };
+      }>;
+    },
+    enabled: !!groupId,
+    staleTime: 1000 * 60 * 5,
   });
 }
 

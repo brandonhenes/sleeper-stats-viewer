@@ -726,12 +726,25 @@ export const cache = {
     return result as TradeAsset[];
   },
 
-  async getTradeAssetCounts(): Promise<{ total: number; players: number; picks: number }> {
-    const total = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets);
+  async getTradeAssetCountsFiltered(opts: { minTimestamp?: number; leagueIds?: string[]; season?: number }): Promise<{ total: number; players: number; picks: number }> {
+    const conditions: ReturnType<typeof sql>[] = [];
+    if (opts.minTimestamp) {
+      conditions.push(sql`${schema.trade_assets.created_at_ms} >= ${opts.minTimestamp}`);
+    }
+    if (opts.leagueIds && opts.leagueIds.length > 0) {
+      conditions.push(inArray(schema.trade_assets.league_id, opts.leagueIds));
+    }
+    if (opts.season) {
+      conditions.push(eq(schema.trade_assets.season, opts.season));
+    }
+    
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    
+    const total = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets).where(whereClause);
     const players = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
-      .where(eq(schema.trade_assets.asset_type, 'player'));
+      .where(whereClause ? and(whereClause, eq(schema.trade_assets.asset_type, 'player')) : eq(schema.trade_assets.asset_type, 'player'));
     const picks = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
-      .where(eq(schema.trade_assets.asset_type, 'pick'));
+      .where(whereClause ? and(whereClause, eq(schema.trade_assets.asset_type, 'pick')) : eq(schema.trade_assets.asset_type, 'pick'));
     return {
       total: Number(total[0]?.count) || 0,
       players: Number(players[0]?.count) || 0,
@@ -739,14 +752,29 @@ export const cache = {
     };
   },
 
-  async getMostTradedPlayers(limit: number = 20): Promise<{ player_id: string; player_name: string | null; trade_count: number }[]> {
+  async getTradeAssetCounts(): Promise<{ total: number; players: number; picks: number }> {
+    return this.getTradeAssetCountsFiltered({});
+  },
+
+  async getMostTradedPlayersFiltered(limit: number = 20, opts: { minTimestamp?: number; leagueIds?: string[]; season?: number }): Promise<{ player_id: string; player_name: string | null; trade_count: number }[]> {
+    const conditions: ReturnType<typeof sql>[] = [eq(schema.trade_assets.asset_type, 'player')];
+    if (opts.minTimestamp) {
+      conditions.push(sql`${schema.trade_assets.created_at_ms} >= ${opts.minTimestamp}`);
+    }
+    if (opts.leagueIds && opts.leagueIds.length > 0) {
+      conditions.push(inArray(schema.trade_assets.league_id, opts.leagueIds));
+    }
+    if (opts.season) {
+      conditions.push(eq(schema.trade_assets.season, opts.season));
+    }
+    
     const result = await db.select({
       player_id: schema.trade_assets.asset_key,
       player_name: schema.trade_assets.asset_name,
       trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
     })
       .from(schema.trade_assets)
-      .where(eq(schema.trade_assets.asset_type, 'player'))
+      .where(and(...conditions))
       .groupBy(schema.trade_assets.asset_key, schema.trade_assets.asset_name)
       .orderBy(desc(sql`count(distinct ${schema.trade_assets.trade_id})`))
       .limit(limit);
@@ -757,13 +785,28 @@ export const cache = {
     }));
   },
 
-  async getMostTradedPicks(limit: number = 20): Promise<{ pick_type: string; trade_count: number }[]> {
+  async getMostTradedPlayers(limit: number = 20): Promise<{ player_id: string; player_name: string | null; trade_count: number }[]> {
+    return this.getMostTradedPlayersFiltered(limit, {});
+  },
+
+  async getMostTradedPicksFiltered(limit: number = 20, opts: { minTimestamp?: number; leagueIds?: string[]; season?: number }): Promise<{ pick_type: string; trade_count: number }[]> {
+    const conditions: ReturnType<typeof sql>[] = [eq(schema.trade_assets.asset_type, 'pick')];
+    if (opts.minTimestamp) {
+      conditions.push(sql`${schema.trade_assets.created_at_ms} >= ${opts.minTimestamp}`);
+    }
+    if (opts.leagueIds && opts.leagueIds.length > 0) {
+      conditions.push(inArray(schema.trade_assets.league_id, opts.leagueIds));
+    }
+    if (opts.season) {
+      conditions.push(eq(schema.trade_assets.season, opts.season));
+    }
+    
     const result = await db.select({
       pick_type: schema.trade_assets.asset_key,
       trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
     })
       .from(schema.trade_assets)
-      .where(eq(schema.trade_assets.asset_type, 'pick'))
+      .where(and(...conditions))
       .groupBy(schema.trade_assets.asset_key)
       .orderBy(desc(sql`count(distinct ${schema.trade_assets.trade_id})`))
       .limit(limit);
@@ -773,7 +816,21 @@ export const cache = {
     }));
   },
 
-  async getTradesBySeason(): Promise<{ season: number; trade_count: number; player_count: number; pick_count: number }[]> {
+  async getMostTradedPicks(limit: number = 20): Promise<{ pick_type: string; trade_count: number }[]> {
+    return this.getMostTradedPicksFiltered(limit, {});
+  },
+
+  async getTradesFilteredBySeason(opts: { minTimestamp?: number; leagueIds?: string[] }): Promise<{ season: number; trade_count: number; player_count: number; pick_count: number }[]> {
+    const conditions: ReturnType<typeof sql>[] = [];
+    if (opts.minTimestamp) {
+      conditions.push(sql`${schema.trade_assets.created_at_ms} >= ${opts.minTimestamp}`);
+    }
+    if (opts.leagueIds && opts.leagueIds.length > 0) {
+      conditions.push(inArray(schema.trade_assets.league_id, opts.leagueIds));
+    }
+    
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    
     const result = await db.select({
       season: schema.trade_assets.season,
       trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
@@ -781,6 +838,7 @@ export const cache = {
       pick_count: sql<number>`count(case when ${schema.trade_assets.asset_type} = 'pick' then 1 end)`,
     })
       .from(schema.trade_assets)
+      .where(whereClause)
       .groupBy(schema.trade_assets.season)
       .orderBy(desc(schema.trade_assets.season));
     return result.map(r => ({
@@ -789,6 +847,53 @@ export const cache = {
       player_count: Number(r.player_count),
       pick_count: Number(r.pick_count),
     }));
+  },
+
+  async getTradesBySeason(): Promise<{ season: number; trade_count: number; player_count: number; pick_count: number }[]> {
+    return this.getTradesFilteredBySeason({});
+  },
+
+  async getActiveLeagueIds(userId: string): Promise<string[]> {
+    const leagues = await this.getLeaguesForUser(userId);
+    const currentSeason = new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+    const groups = new Map<string, { league_id: string; season: number }>();
+    
+    for (const league of leagues) {
+      const groupId = league.group_id || league.league_id;
+      const existing = groups.get(groupId);
+      if (!existing || league.season > existing.season) {
+        groups.set(groupId, { league_id: league.league_id, season: league.season });
+      }
+    }
+    
+    return Array.from(groups.values())
+      .filter(g => g.season === currentSeason)
+      .map(g => g.league_id);
+  },
+
+  async getTradeAssetsForLeagues(leagueIds: string[], opts?: { season?: number }): Promise<TradeAsset[]> {
+    if (leagueIds.length === 0) return [];
+    
+    const conditions = [inArray(schema.trade_assets.league_id, leagueIds)];
+    if (opts?.season) {
+      conditions.push(eq(schema.trade_assets.season, opts.season));
+    }
+    
+    const result = await db.select().from(schema.trade_assets)
+      .where(and(...conditions))
+      .orderBy(desc(schema.trade_assets.created_at_ms));
+    return result as TradeAsset[];
+  },
+
+  async getLeagueIdsForGroup(groupId: string): Promise<{ league_id: string; season: number }[]> {
+    const result = await db.select({
+      league_id: schema.leagues.league_id,
+      season: schema.leagues.season,
+    })
+      .from(schema.leagues)
+      .where(eq(schema.leagues.group_id, groupId))
+      .orderBy(desc(schema.leagues.season));
+    return result;
   },
 
   async clearTradeAssetsForLeague(leagueId: string): Promise<void> {

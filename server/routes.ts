@@ -1419,16 +1419,29 @@ export async function registerRoutes(
         owner_id: number;
       }> | null;
 
-      // Extract unique years from traded picks data (only show years that have trade data)
-      const yearsFromData = new Set<string>();
+      // Get league season to determine baseline years
+      const league = await cache.getLeagueById(leagueId);
+      const currentSeason = league?.season ? parseInt(league.season, 10) : new Date().getFullYear();
+      
+      // Always generate baseline years: current season + 2 future years
+      const baselineYears = [
+        String(currentSeason),
+        String(currentSeason + 1),
+        String(currentSeason + 2),
+      ];
+      
+      // Also include any years from traded picks data
+      const yearsFromData = new Set<string>(baselineYears);
       if (tradedPicks && Array.isArray(tradedPicks)) {
         for (const pick of tradedPicks) {
           yearsFromData.add(pick.season);
         }
       }
       
-      // Sort years and take only active seasons (years with traded pick data)
-      const years = Array.from(yearsFromData).sort();
+      // Sort years (only future years from baseline onwards)
+      const years = Array.from(yearsFromData)
+        .filter(y => parseInt(y, 10) >= currentSeason)
+        .sort();
       const rounds = [1, 2, 3, 4];
 
       // Track user's picks: acquired and traded away
@@ -1494,6 +1507,13 @@ export async function registerRoutes(
       // Pick Hoard Index: weighted sum of round 1-2 picks
       const pickHoardIndex = totalR1 * 2 + totalR2;
 
+      const debug = req.query.debug === "1" ? {
+        baseline_years: baselineYears,
+        years_shown: years,
+        current_season: currentSeason,
+        traded_picks_count: tradedPicks?.length || 0,
+      } : undefined;
+
       res.json({
         league_id: leagueId,
         username,
@@ -1509,6 +1529,8 @@ export async function registerRoutes(
         pick_hoard_index: pickHoardIndex,
         acquired_picks: userPicks,
         traded_away_picks: tradedAwayPicks,
+        baseline_years_used: true,
+        ...(debug && { debug }),
       });
     } catch (e) {
       console.error("Draft capital error:", e);
@@ -1516,13 +1538,14 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/league/:leagueId/churn?username=<username>&timeframe=<season|last30|lifetime>
+  // GET /api/league/:leagueId/churn?username=<username>&timeframe=<season|last30|lifetime>&groupId=<groupId>
   // Returns roster churn stats (waiver moves, transactions) for a user
-  // timeframe: "season" (default), "last30" (last 30 days), "lifetime" (all time)
+  // timeframe: "season" (default), "last30" (last 30 days), "lifetime" (all time - requires groupId)
   app.get("/api/league/:leagueId/churn", async (req, res) => {
     const { leagueId } = req.params;
     const username = req.query.username as string;
     const timeframe = (req.query.timeframe as string) || "season";
+    const groupId = req.query.groupId as string | undefined;
 
     if (!username) {
       return res.status(400).json({ message: "Missing username" });
@@ -1543,16 +1566,38 @@ export async function registerRoutes(
 
       const userRosterId = userRoster.roster_id;
 
-      // Fetch transactions (non-trade) from cache or compute from trades table
-      let leagueTxns = await cache.getTradesForLeague(leagueId);
+      // Fetch transactions based on timeframe
+      let leagueTxns: Awaited<ReturnType<typeof cache.getTradesForLeague>> = [];
+      let leagueIdsQueried: string[] = [];
       
-      // Apply timeframe filter if needed
-      // For "last30" filter by created_at timestamp
+      if (timeframe === "lifetime" && groupId) {
+        const leaguesInGroup = await cache.getLeagueIdsForGroup(groupId);
+        for (const lg of leaguesInGroup) {
+          if (lg?.league_id) {
+            leagueIdsQueried.push(lg.league_id);
+            const txns = await cache.getTradesForLeague(lg.league_id);
+            leagueTxns.push(...txns);
+          }
+        }
+        if (leagueIdsQueried.length === 0) {
+          console.warn(`Churn lifetime: No league IDs found for group ${groupId}`);
+          return res.status(400).json({ 
+            message: "No league history found for this group",
+            group_id: groupId,
+          });
+        }
+      } else {
+        leagueTxns = await cache.getTradesForLeague(leagueId);
+        leagueIdsQueried = [leagueId];
+      }
+      
+      // Apply timeframe filter
       if (timeframe === "last30") {
         const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
         leagueTxns = leagueTxns.filter(t => t.created_at >= thirtyDaysAgo);
       }
-      // "season" and "lifetime" use all transactions for this leagueId (season scope is implicit)
+      // "season" uses only current leagueId transactions (done above)
+      // "lifetime" uses all league group transactions (done above)
       
       // Count adds/drops for the user (waiver moves stored in roster_ids)
       let addsCount = 0;
@@ -1635,6 +1680,13 @@ export async function registerRoutes(
       const timeframeLabel = timeframe === "last30" ? "Last 30 Days" :
         timeframe === "lifetime" ? "All Time" : "This Season";
 
+      const debug = req.query.debug === "1" ? {
+        group_id: groupId || null,
+        transactions_count: leagueTxns.length,
+        leagues_queried: leagueIdsQueried,
+        scope: timeframe === "lifetime" && groupId ? "group" : "single_league",
+      } : undefined;
+
       res.json({
         league_id: leagueId,
         username,
@@ -1652,6 +1704,7 @@ export async function registerRoutes(
         activity_level: totalMoves > leagueAvg * 1.5 ? "very_active" :
           totalMoves > leagueAvg ? "active" :
           totalMoves > leagueAvg * 0.5 ? "moderate" : "inactive",
+        ...(debug && { debug }),
       });
     } catch (e) {
       console.error("Churn stats error:", e);
@@ -3013,6 +3066,92 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/group/:groupId/trade-assets - Get normalized trade assets for all leagues in a group
+  // Query params:
+  //   season: number (optional - filter by specific season)
+  app.get("/api/group/:groupId/trade-assets", async (req, res) => {
+    const { groupId } = req.params;
+    const seasonParam = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+
+    try {
+      const leaguesInGroup = await cache.getLeagueIdsForGroup(groupId);
+      if (leaguesInGroup.length === 0) {
+        return res.json({
+          group_id: groupId,
+          seasons: [],
+          total_assets: 0,
+          trades_count: 0,
+          trades: [],
+          debug: { leagues_count: 0, season_filter: seasonParam || null },
+        });
+      }
+
+      const latestSeason = Math.max(...leaguesInGroup.map(l => l.season));
+      const leagueIds = leaguesInGroup.map(l => l.league_id);
+      const availableSeasons = Array.from(new Set(leaguesInGroup.map(l => l.season))).sort((a, b) => b - a);
+
+      const assets = await cache.getTradeAssetsForLeagues(leagueIds, { season: seasonParam });
+
+      const byTrade = new Map<string, {
+        trade_id: string;
+        created_at_ms: number;
+        season: number;
+        league_id: string;
+        participants: number[];
+        assets: Array<{
+          roster_id: number;
+          direction: string;
+          asset_type: string;
+          asset_key: string;
+          asset_name: string | null;
+        }>;
+      }>();
+
+      for (const asset of assets) {
+        if (!byTrade.has(asset.trade_id)) {
+          byTrade.set(asset.trade_id, {
+            trade_id: asset.trade_id,
+            created_at_ms: asset.created_at_ms,
+            season: asset.season,
+            league_id: asset.league_id,
+            participants: [],
+            assets: [],
+          });
+        }
+        const group = byTrade.get(asset.trade_id)!;
+        if (!group.participants.includes(asset.roster_id)) {
+          group.participants.push(asset.roster_id);
+        }
+        group.assets.push({
+          roster_id: asset.roster_id,
+          direction: asset.direction,
+          asset_type: asset.asset_type,
+          asset_key: asset.asset_key,
+          asset_name: asset.asset_name,
+        });
+      }
+
+      const grouped = Array.from(byTrade.values()).sort((a, b) => b.created_at_ms - a.created_at_ms);
+
+      res.json({
+        group_id: groupId,
+        seasons: availableSeasons,
+        latest_season: latestSeason,
+        total_assets: assets.length,
+        trades_count: grouped.length,
+        trades: grouped,
+        debug: {
+          leagues_count: leagueIds.length,
+          season_filter: seasonParam || null,
+          default_season: latestSeason,
+        },
+      });
+    } catch (e) {
+      console.error("Group trade assets error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
   // GET /api/compare/shared-leagues - Get shared leagues between two users
   app.get("/api/compare/shared-leagues", async (req, res) => {
     const { userA, userB } = req.query;
@@ -3131,22 +3270,71 @@ export async function registerRoutes(
   });
 
   // GET /api/market/trends - Get market trends across all leagues
+  // Query params:
+  //   timeframe: '7d' | '30d' | 'season' | 'all' (default: '30d')
+  //   scope: 'active' | 'all' (default: 'active')
+  //   username: string (required for active scope filtering)
   app.get("/api/market/trends", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 20;
+      const timeframe = (req.query.timeframe as string) || '30d';
+      const scope = (req.query.scope as string) || 'active';
+      const username = req.query.username as string;
+      
+      const now = Date.now();
+      let minTimestamp: number | undefined;
+      let season: number | undefined;
+      let leagueIds: string[] | undefined;
+      
+      const currentSeason = getCurrentNFLSeason();
+      
+      switch (timeframe) {
+        case '7d':
+          minTimestamp = now - (7 * 24 * 60 * 60 * 1000);
+          break;
+        case '30d':
+          minTimestamp = now - (30 * 24 * 60 * 60 * 1000);
+          break;
+        case 'season':
+          season = currentSeason;
+          break;
+        case 'all':
+        default:
+          break;
+      }
+      
+      if (scope === 'active' && username) {
+        const user = await cache.getUserByUsername(username);
+        if (user) {
+          leagueIds = await cache.getActiveLeagueIds(user.user_id);
+        }
+      }
+      
+      const filterOpts = { minTimestamp, leagueIds, season };
       
       const [counts, mostTradedPlayers, mostTradedPicks, bySeason] = await Promise.all([
-        cache.getTradeAssetCounts(),
-        cache.getMostTradedPlayers(limit),
-        cache.getMostTradedPicks(limit),
-        cache.getTradesBySeason(),
+        cache.getTradeAssetCountsFiltered(filterOpts),
+        cache.getMostTradedPlayersFiltered(limit, filterOpts),
+        cache.getMostTradedPicksFiltered(limit, filterOpts),
+        cache.getTradesFilteredBySeason({ minTimestamp, leagueIds }),
       ]);
+      
+      const dateFrom = minTimestamp ? new Date(minTimestamp).toISOString().split('T')[0] : null;
+      const dateTo = new Date(now).toISOString().split('T')[0];
 
       res.json({
         totals: counts,
         most_traded_players: mostTradedPlayers,
         most_traded_picks: mostTradedPicks,
         by_season: bySeason,
+        debug: {
+          timeframe,
+          scope,
+          date_from: dateFrom,
+          date_to: dateTo,
+          leagues_count: leagueIds?.length || 'all',
+          season_filter: season || null,
+        },
       });
     } catch (e) {
       console.error("Market trends error:", e);

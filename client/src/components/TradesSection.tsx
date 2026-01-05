@@ -1,23 +1,40 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useTradeAssets, useNormalizeTrades, useLeagueTeams } from "@/hooks/use-sleeper";
-import { RefreshCw, User, Calendar, TrendingUp, TrendingDown } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useGroupTradeAssets, useNormalizeTrades, useLeagueTeams } from "@/hooks/use-sleeper";
+import { RefreshCw, User, Calendar, TrendingUp, TrendingDown, Filter } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface TradesSectionProps {
-  leagueId: string;
+  groupId?: string;
+  leagueId?: string;
   username?: string;
   currentRosterId?: number;
 }
 
-export function TradesSection({ leagueId, username, currentRosterId }: TradesSectionProps) {
-  const { data, isLoading, error, refetch } = useTradeAssets(leagueId);
+export function TradesSection({ groupId, leagueId, username, currentRosterId }: TradesSectionProps) {
+  const [seasonFilter, setSeasonFilter] = useState<number | 'all' | null>(null);
+  const [filterRosterId, setFilterRosterId] = useState<number | undefined>(undefined);
+  
+  const { data, isLoading, error, refetch } = useGroupTradeAssets(
+    groupId || "", 
+    seasonFilter === null ? undefined : seasonFilter
+  );
   const { data: teamsData } = useLeagueTeams(leagueId);
   const normalizeMutation = useNormalizeTrades();
-  const [filterRosterId, setFilterRosterId] = useState<number | undefined>(undefined);
+  
+  useEffect(() => {
+    if (data?.latest_season && seasonFilter === null) {
+      setSeasonFilter(data.latest_season);
+    }
+  }, [data?.latest_season, seasonFilter]);
+  
+  if (!groupId || !leagueId) {
+    return null;
+  }
 
   const handleNormalize = async () => {
     try {
@@ -90,15 +107,34 @@ export function TradesSection({ leagueId, username, currentRosterId }: TradesSec
   }
 
   const trades = data?.trades || [];
+  const availableSeasons = data?.seasons || [];
   const filteredTrades = filterRosterId !== undefined
     ? trades.filter(t => t.participants.includes(filterRosterId))
     : trades;
 
   return (
     <Card data-testid="card-trades-section">
-      <CardHeader className="flex flex-row items-center justify-between gap-2">
+      <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <CardTitle className="text-lg">Trade Assets</CardTitle>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {availableSeasons.length > 0 && (
+            <Select
+              value={seasonFilter === 'all' ? 'all' : seasonFilter !== null ? String(seasonFilter) : ''}
+              onValueChange={(val) => setSeasonFilter(val === 'all' ? 'all' : parseInt(val, 10))}
+            >
+              <SelectTrigger className="w-32" data-testid="select-season-filter">
+                <SelectValue placeholder="Season" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Seasons</SelectItem>
+                {availableSeasons.map((s) => (
+                  <SelectItem key={s} value={String(s)}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Badge variant="secondary" data-testid="badge-trades-total-count">
             {filteredTrades.length} trades
           </Badge>

@@ -1,0 +1,142 @@
+REPLIT AGENT — PHASE 2.1 FIX SPRINT (BUGFIXES + UX POLISH)
+Project: Sleeper Scout (existing codebase). DO NOT rewrite the app. Make minimal, targeted fixes.
+Primary objective: fix scope + timeframe bugs so “Recent vs Season vs All Time” actually changes results, and “Latest league” is truly the latest season.
+
+────────────────────────────────────────────────────────────
+1) MARKET TRENDS: DEFAULT TO RECENT (NOT ALL-TIME)
+────────────────────────────────────────────────────────────
+Current problem:
+- Market counts are effectively “all-time across everything,” which isn’t actionable.
+Required change:
+- Market default view MUST be “Last 30 Days” (or “Last 14 Days” if easier) using created_at_ms.
+- Add timeframe controls at top of Market:
+  [7D] [30D] [Season] [All Time]
+  Default = 30D.
+Scope rules:
+- Default scope = ACTIVE leagues only (latest league_id per active group).
+- Add toggle: Include History (optional). Default OFF.
+Implementation:
+- When querying trade_assets for Market:
+  - If timeframe=7D: created_at_ms >= now - 7 days
+  - If timeframe=30D: created_at_ms >= now - 30 days
+  - If timeframe=Season: season == currentSeason AND league_id in active latest ids
+  - If timeframe=AllTime: no date filter (but still obey Active/History scope)
+UI additions:
+- Show “Window: last 30 days” label.
+- If results are low/zero, show friendly message (“No trades in last 30 days for this scope.”).
+
+Acceptance:
+- Switching 30D → All Time must change the totals.
+- Switching Active → Include History must change totals.
+
+────────────────────────────────────────────────────────────
+2) LEAGUE TRADES: SHOW MOST RECENT SEASON BY DEFAULT + COLLAPSE BY YEAR/SEASON
+────────────────────────────────────────────────────────────
+Current problem:
+- Trade log inside a league is pulling from oldest season rather than latest.
+- No easy collapse by year.
+Required change:
+- Default League > Trading > Trade Assets view MUST use:
+  “Latest League Only” (latest league_id for that group)
+- Add collapse/filter controls:
+  - Season selector dropdown (e.g., 2025, 2024, 2023...) OR
+  - Collapsible groups by season
+  Default selected season = latest.
+- Sorting: trades must be newest-first within each season group.
+
+Data rules:
+- If user switches to “All Time” inside a league, then include prior seasons by traversing group history league_ids.
+- If created_at_ms missing, fallback grouping to season or transaction round; never break UI.
+
+Acceptance:
+- Latest season trades appear first.
+- User can collapse/expand season groups.
+
+────────────────────────────────────────────────────────────
+3) ROSTER ACTIVITY: FIX TIMEFRAME FILTERS (SEASON / 30 DAYS / ALL TIME)
+────────────────────────────────────────────────────────────
+Current problem:
+- Season / 30 days / all time show the same data.
+Required change:
+- Implement REAL filtering in roster activity calculations using transaction timestamps + season/league boundaries.
+
+Definitions:
+- Season = ONLY the latest league_id instance (latest season for that league group) AND transactions for that league_id.
+- 30 Days = created_at_ms >= now - 30 days (still scoped to latest league_id by default)
+- All Time = all league_ids in that league group history, no date filter.
+
+Implementation:
+- Ensure the query/aggregation uses the selected timeframe:
+  - Adds = count of player adds (from transactions adds map)
+  - Drops = count of drops (from transactions drops map, if stored; if not available, infer carefully)
+  - Trades = count of trade transactions
+- Add a UI label showing timeframe boundaries:
+  - “30D: Dec 5 → Jan 4” etc (calculated)
+- IMPORTANT: do not mix “All Time” results into “Season” view.
+
+Acceptance:
+- Season vs All Time yields different totals for most leagues.
+- 30 Days yields smaller totals than All Time.
+
+────────────────────────────────────────────────────────────
+4) DRAFT CAPITAL: MISSING 2026/2027 ROWS + TILE SUMMARY BUG
+────────────────────────────────────────────────────────────
+Current problems:
+- Some league views/tiles don’t show future years (2026, 2027) while others do.
+Root cause (likely):
+- draft capital years are derived only from traded_picks years (so if no trades for 2026/2027, those rows never appear)
+Required change:
+- Draft Capital must generate a baseline set of pick years regardless of trades.
+
+Rules:
+- Determine baseYears as:
+  [league.season, league.season+1, league.season+2] (at minimum)
+  PLUS any extra years found in traded_picks for that league_id.
+- For each roster, initialize ownership:
+  - each year in baseYears
+  - each round that league supports (default 1–4; extend if settings show more)
+  - default owner = that roster (original_owner_roster_id = roster_id, current_owner_roster_id = roster_id)
+- Then apply traded_picks to update current_owner_roster_id.
+
+DB:
+- Ensure draft_picks_ownership table contains rows for all baseYears even if no traded_picks exist.
+
+UI:
+- Draft capital table should always show those years, sorted ascending by year.
+- The “main tile” summary must use the same data source (draft_picks_ownership) so it includes 2026/2027 too.
+- If league truly has no future picks (rare), show row with zeros, but still show the year.
+
+Acceptance:
+- For any league, draft capital includes 2026/2027 (when baseYears includes them).
+- Main league tiles reflect those counts consistently.
+
+────────────────────────────────────────────────────────────
+5) GOTCHAS / RESILIENCE (DO NOT SKIP)
+────────────────────────────────────────────────────────────
+- Timestamps can be missing/inconsistent:
+  - If created_at_ms missing, fallback to (season + round/week) for grouping.
+- Multi-team trades exist:
+  - UI and parsing must support 3+ teams without breaking.
+- Week ranges vary:
+  - Do not hardcode 18. Transactions still fetch rounds 0..22.
+- Scope confusion is the #1 source of “wrong numbers”:
+  - Always label: Active vs History + timeframe window + which league_id(s) included.
+- Rate limiting:
+  - Use cached DB; only call Sleeper on Sync/Refresh, with concurrency caps.
+
+────────────────────────────────────────────────────────────
+DEBUG (REQUIRED)
+────────────────────────────────────────────────────────────
+Add/extend ?debug=1 panels to show:
+- Market: timeframe filter applied + date cutoff + leagues included count
+- League trades: which league_id(s) used + selected season + trade count
+- Roster activity: timeframe + date cutoff + transaction counts by type
+- Draft capital: baseYears generated + total pick rows created
+
+────────────────────────────────────────────────────────────
+DONE WHEN
+────────────────────────────────────────────────────────────
+- Market defaults to 30D and is visibly different from All Time.
+- League trade log defaults to latest season; older seasons are collapsible.
+- Roster Activity tabs return different numbers.
+- Draft capital consistently shows 2026/2027 and tiles match.

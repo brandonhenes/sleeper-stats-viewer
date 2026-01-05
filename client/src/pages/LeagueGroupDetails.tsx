@@ -39,7 +39,7 @@ export default function LeagueGroupDetails() {
   const [churnTimeframe, setChurnTimeframe] = useState<string>("season");
   
   const { data: draftCapitalData, isLoading: draftCapitalLoading } = useDraftCapital(latestLeagueId, username);
-  const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username, churnTimeframe);
+  const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username, churnTimeframe, groupId);
   const { data: tradeTimingData, isLoading: tradeTimingLoading } = useTradeTiming(latestLeagueId, username);
   const { data: allPlayData, isLoading: allPlayLoading } = useAllPlay(latestLeagueId, username);
 
@@ -713,7 +713,7 @@ export default function LeagueGroupDetails() {
           <TeamsSection leagueId={latestLeagueId} username={username} />
 
           {/* Trade Assets Section - Phase 2 */}
-          <TradesSection leagueId={latestLeagueId} username={username} />
+          <TradesSection groupId={groupId} leagueId={latestLeagueId} username={username} />
         </div>
       </div>
     </Layout>
