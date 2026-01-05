@@ -184,6 +184,16 @@ export const leagueWithRecordSchema = z.object({
 });
 
 // League Group: aggregates leagues across seasons
+export const tradeSummarySchema = z.object({
+  trade_count: z.number(),
+  trading_style: z.string().nullable(),
+  top_partner: z.object({
+    user_id: z.string(),
+    display_name: z.string().nullable(),
+    trade_count: z.number(),
+  }).nullable(),
+});
+
 export const leagueGroupSchema = z.object({
   group_id: z.string(),
   name: z.string(), // most recent season name
@@ -195,6 +205,7 @@ export const leagueGroupSchema = z.object({
   league_type: z.enum(["dynasty", "redraft", "unknown"]).optional(), // derived from settings
   is_active: z.boolean().optional(), // true if user has roster in latest season and league is active
   latest_league_id: z.string().optional(), // the latest league_id for this group
+  trade_summary: tradeSummarySchema.optional(), // trade stats for this group
 });
 
 // Original league schema (kept for backwards compatibility)
@@ -284,6 +295,7 @@ export const h2hResponseSchema = z.object({
 export type SleeperUser = z.infer<typeof sleeperUserSchema>;
 export type League = z.infer<typeof leagueSchema>;
 export type LeagueWithRecord = z.infer<typeof leagueWithRecordSchema>;
+export type TradeSummary = z.infer<typeof tradeSummarySchema>;
 export type LeagueGroup = z.infer<typeof leagueGroupSchema>;
 export type MyRecord = z.infer<typeof myRecordSchema>;
 export type LeagueUser = z.infer<typeof leagueUserSchema>;
@@ -326,7 +338,9 @@ export const tradeSchema = z.object({
 export const tradesResponseSchema = z.object({
   group_id: z.string(),
   trades: z.array(tradeSchema),
+  mode: z.enum(["current", "history"]).optional(),
   seasons_checked: z.number().optional(),
+  total_seasons_in_group: z.number().optional(),
   total_trades_in_db: z.number().optional(),
 });
 

@@ -154,12 +154,13 @@ export function useH2h(groupId: string | undefined, username: string | undefined
 }
 
 // GET /api/group/:groupId/trades
-export function useTrades(groupId: string | undefined) {
+// mode: "current" = latest season only, "history" = all seasons
+export function useTrades(groupId: string | undefined, mode: "current" | "history" = "current") {
   return useQuery({
-    queryKey: [api.sleeper.trades.path, groupId],
+    queryKey: [api.sleeper.trades.path, groupId, mode],
     queryFn: async () => {
       if (!groupId) return null;
-      const url = buildUrl(api.sleeper.trades.path, { groupId });
+      const url = `${buildUrl(api.sleeper.trades.path, { groupId })}?mode=${mode}`;
       const res = await fetch(url);
       
       if (!res.ok) {
@@ -574,7 +575,6 @@ export function useGroupTradeAssets(groupId: string | undefined, season?: number
         };
       }>;
     },
-    enabled: !!groupId,
     staleTime: 1000 * 60 * 5,
   });
 }

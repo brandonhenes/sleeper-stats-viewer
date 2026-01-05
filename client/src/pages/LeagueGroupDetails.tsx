@@ -4,7 +4,7 @@ import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, ArrowRightLeft, Layers, RefreshCw, Calendar, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, Trophy, Target, TrendingUp, ArrowRightLeft, Layers, RefreshCw, Calendar, Sparkles, Clock, History } from "lucide-react";
 import { motion } from "framer-motion";
 import { Layout } from "@/components/Layout";
 import {
@@ -25,15 +25,22 @@ export default function LeagueGroupDetails() {
   const groupId = params.groupId;
   
   const username = params.username || localStorage.getItem("sleeper_username") || undefined;
+  
+  // Debug mode from URL params
+  const isDebug = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1';
+  
+  // Current vs History mode toggle - defined early so hooks can use it
+  const [viewMode, setViewMode] = useState<"current" | "history">("current");
 
   const { data: overviewData, isLoading: overviewLoading } = useSleeperOverview(username);
   const { data: h2hData, isLoading: h2hLoading, error: h2hError } = useH2h(groupId, username);
-  const { data: tradesData, isLoading: tradesLoading } = useTrades(groupId);
+  const { data: tradesData, isLoading: tradesLoading } = useTrades(groupId, viewMode);
 
   const leagueGroup = overviewData?.league_groups.find((g) => g.group_id === groupId);
   
   // Get the latest league_id for the group (for draft capital and churn)
-  const latestLeagueId = leagueGroup?.league_ids[leagueGroup.league_ids.length - 1];
+  // In "current" mode, use latest_league_id; in "history" mode, all leagues in group
+  const latestLeagueId = leagueGroup?.latest_league_id || leagueGroup?.league_ids[leagueGroup.league_ids.length - 1];
   
   // Churn timeframe state: "season", "last30", "lifetime"
   const [churnTimeframe, setChurnTimeframe] = useState<string>("season");
@@ -119,6 +126,11 @@ export default function LeagueGroupDetails() {
                       {leagueGroup.league_type}
                     </Badge>
                   )}
+                  {viewMode === "history" && leagueGroup.seasons_count > 1 && (
+                    <Badge variant="secondary">
+                      History ({leagueGroup.seasons_count} seasons)
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-muted-foreground mt-1">
                   {leagueGroup.min_season === leagueGroup.max_season 
@@ -128,27 +140,55 @@ export default function LeagueGroupDetails() {
                 </p>
               </div>
               
-              <div className="flex gap-4">
-                <Card className="p-4 text-center">
-                  <div className="text-2xl font-bold font-mono">
-                    {formatRecord(
-                      leagueGroup.overall_record.wins,
-                      leagueGroup.overall_record.losses,
-                      leagueGroup.overall_record.ties
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Official Record</div>
-                </Card>
-                <Card className="p-4 text-center">
-                  <div className="text-2xl font-bold font-mono">
-                    {winPct(
-                      leagueGroup.overall_record.wins,
-                      leagueGroup.overall_record.losses,
-                      leagueGroup.overall_record.ties
-                    )}%
-                  </div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wider">Win Rate</div>
-                </Card>
+              <div className="flex flex-col gap-3 items-end">
+                <div className="flex gap-1 p-1 bg-muted rounded-md" data-testid="view-mode-toggle">
+                  <Button
+                    variant={viewMode === "current" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setViewMode("current")}
+                    className="gap-1"
+                    data-testid="button-view-current"
+                  >
+                    <Clock className="w-3 h-3" />
+                    Current
+                  </Button>
+                  <Button
+                    variant={viewMode === "history" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setViewMode("history")}
+                    className="gap-1"
+                    disabled={leagueGroup.seasons_count <= 1}
+                    data-testid="button-view-history"
+                  >
+                    <History className="w-3 h-3" />
+                    History
+                  </Button>
+                </div>
+                
+                <div className="flex gap-4">
+                  <Card className="p-4 text-center">
+                    <div className="text-2xl font-bold font-mono">
+                      {formatRecord(
+                        leagueGroup.overall_record.wins,
+                        leagueGroup.overall_record.losses,
+                        leagueGroup.overall_record.ties
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">
+                      {viewMode === "current" ? "Official Record" : "All-Time Record"}
+                    </div>
+                  </Card>
+                  <Card className="p-4 text-center">
+                    <div className="text-2xl font-bold font-mono">
+                      {winPct(
+                        leagueGroup.overall_record.wins,
+                        leagueGroup.overall_record.losses,
+                        leagueGroup.overall_record.ties
+                      )}%
+                    </div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Win Rate</div>
+                  </Card>
+                </div>
               </div>
             </div>
           </div>
@@ -714,6 +754,69 @@ export default function LeagueGroupDetails() {
 
           {/* Trade Assets Section - Phase 2 */}
           <TradesSection groupId={groupId} leagueId={latestLeagueId} username={username} />
+          
+          {/* Debug Panel */}
+          {isDebug && leagueGroup && (
+            <Card className="mt-8 p-4 bg-muted/50 border-dashed">
+              <div className="flex items-center gap-2 mb-3">
+                <Badge variant="outline" className="text-xs">DEBUG</Badge>
+                <span className="text-sm font-mono font-medium">Phase 2.2 Diagnostics</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
+                <div>
+                  <span className="text-muted-foreground">latestLeagueId:</span>
+                  <div className="truncate">{latestLeagueId || 'N/A'}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">groupId:</span>
+                  <div className="truncate">{groupId}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">viewMode:</span>
+                  <div>{viewMode} <span className="text-yellow-600">(UI only)</span></div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">seasons:</span>
+                  <div>{leagueGroup.min_season}-{leagueGroup.max_season} ({leagueGroup.seasons_count})</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">is_active:</span>
+                  <div>{leagueGroup.is_active ? 'true' : 'false'}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">league_type:</span>
+                  <div>{leagueGroup.league_type || 'unknown'}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">trade_count:</span>
+                  <div>{leagueGroup.trade_summary?.trade_count ?? 'N/A'} <span className="text-muted-foreground">(latest season)</span></div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">trading_style:</span>
+                  <div>{leagueGroup.trade_summary?.trading_style || 'N/A'}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">data_scope:</span>
+                  <div>trades: {tradesData?.mode || 'N/A'} ({tradesData?.seasons_checked || 0}/{tradesData?.total_seasons_in_group || 0} seasons)</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">cache_source:</span>
+                  <div>{overviewData?.cached ? 'cached' : 'fresh'}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">needs_sync:</span>
+                  <div>{overviewData?.needs_sync ? 'true (stale)' : 'false'}</div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">last_sync:</span>
+                  <div>{overviewData?.lastSyncedAt ? new Date(overviewData.lastSyncedAt).toLocaleTimeString() : 'never'}</div>
+                </div>
+              </div>
+              <div className="mt-3 text-xs text-muted-foreground border-t border-border/50 pt-3">
+                <strong>Note:</strong> History mode toggle is UI-only in Phase 2.2. Full history-scoped queries require additional backend work.
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </Layout>

@@ -113,6 +113,13 @@ export interface CachedPlayer {
 
 const STALE_THRESHOLD = 12 * 60 * 60 * 1000;
 
+export const TTL = {
+  ROSTERS: 15 * 60 * 1000,
+  TRADES: 6 * 60 * 60 * 1000,
+  DRAFT_CAPITAL: 6 * 60 * 60 * 1000,
+  USERS: 15 * 60 * 1000,
+};
+
 export const cache = {
   async upsertUser(user: { user_id: string; username: string; display_name: string; avatar?: string | null }): Promise<void> {
     const now = Date.now();
@@ -898,6 +905,61 @@ export const cache = {
 
   async clearTradeAssetsForLeague(leagueId: string): Promise<void> {
     await db.delete(schema.trade_assets).where(eq(schema.trade_assets.league_id, leagueId));
+  },
+
+  async resolveLatestLeagueId(leagueIdOrGroupId: string): Promise<string | null> {
+    const league = await this.getLeagueById(leagueIdOrGroupId);
+    if (!league) return null;
+    
+    const groupId = league.group_id || league.league_id;
+    const leaguesInGroup = await this.getLeagueIdsForGroup(groupId);
+    
+    if (leaguesInGroup.length === 0) {
+      return league.league_id;
+    }
+    
+    return leaguesInGroup[0].league_id;
+  },
+
+  async getRostersLastUpdated(leagueId: string): Promise<number | null> {
+    const result = await db.select({ updated_at: max(schema.rosters.updated_at) })
+      .from(schema.rosters)
+      .where(eq(schema.rosters.league_id, leagueId));
+    return result[0]?.updated_at ?? null;
+  },
+
+  async getTradesLastUpdated(leagueId: string): Promise<number | null> {
+    const result = await db.select({ updated_at: max(schema.trades.updated_at) })
+      .from(schema.trades)
+      .where(eq(schema.trades.league_id, leagueId));
+    return result[0]?.updated_at ?? null;
+  },
+
+  isRostersStale(lastUpdated: number | null): boolean {
+    if (!lastUpdated) return true;
+    return Date.now() - lastUpdated > TTL.ROSTERS;
+  },
+
+  isTradesStale(lastUpdated: number | null): boolean {
+    if (!lastUpdated) return true;
+    return Date.now() - lastUpdated > TTL.TRADES;
+  },
+
+  async getLeagueStaleness(leagueId: string): Promise<{
+    rosters_updated_at: number | null;
+    rosters_stale: boolean;
+    trades_updated_at: number | null;
+    trades_stale: boolean;
+  }> {
+    const rostersUpdated = await this.getRostersLastUpdated(leagueId);
+    const tradesUpdated = await this.getTradesLastUpdated(leagueId);
+    
+    return {
+      rosters_updated_at: rostersUpdated,
+      rosters_stale: this.isRostersStale(rostersUpdated),
+      trades_updated_at: tradesUpdated,
+      trades_stale: this.isTradesStale(tradesUpdated),
+    };
   },
 };
 

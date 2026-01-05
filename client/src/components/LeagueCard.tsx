@@ -1,7 +1,8 @@
 import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Trophy, Users, Calendar } from "lucide-react";
+import { Trophy, Users, Calendar, ArrowRightLeft, Target } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LeagueGroup } from "@shared/schema";
 
@@ -61,6 +62,27 @@ export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps
               {group.name}
             </h3>
 
+            {group.trade_summary && group.trade_summary.trade_count > 0 && (
+              <div className="pt-3 border-t border-border/50 space-y-1">
+                <div className="flex items-center gap-2 text-sm">
+                  <ArrowRightLeft className="w-3 h-3 text-muted-foreground" />
+                  <span className="text-muted-foreground">
+                    {group.trade_summary.trade_count} Trade{group.trade_summary.trade_count !== 1 ? 's' : ''}
+                  </span>
+                  {group.trade_summary.trading_style && (
+                    <Badge variant="outline" className="text-xs">
+                      {group.trade_summary.trading_style}
+                    </Badge>
+                  )}
+                </div>
+                {group.trade_summary.top_partner && (
+                  <div className="text-xs text-muted-foreground">
+                    Top partner: {group.trade_summary.top_partner.display_name || 'Unknown'} ({group.trade_summary.top_partner.trade_count})
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mt-auto grid grid-cols-2 gap-4 pt-4 border-t border-border/50">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Trophy className="w-4 h-4 text-accent" />
@@ -70,6 +92,15 @@ export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps
                 <Users className="w-4 h-4 text-accent" />
                 <span>{group.league_ids.length} League{group.league_ids.length !== 1 ? 's' : ''}</span>
               </div>
+            </div>
+            
+            <div className="pt-3 flex gap-2">
+              <Link href={username ? `/compare?leagueId=${group.latest_league_id}&userA=${username}` : `/compare?leagueId=${group.latest_league_id}`} onClick={(e) => e.stopPropagation()}>
+                <Button variant="outline" size="sm" className="gap-1" data-testid={`button-targets-${group.group_id}`}>
+                  <Target className="w-3 h-3" />
+                  Targets
+                </Button>
+              </Link>
             </div>
           </div>
         </Card>

@@ -1,0 +1,186 @@
+REPLIT AGENT — PHASE 2.2: FIX STALE ROSTERS/RECORDS + TILE FEATURES + CURRENT/HISTORY TOGGLE
+Project: Sleeper Scout (existing codebase). DO NOT rewrite the app. Make minimal, targeted changes. Preserve current UI theme.
+Use SQLite as source of truth, but DO NOT display stale data for “Current” views.
+
+PRIMARY BUG: ROSTER + RECORD ARE TOO OLD
+Symptom:
+- League roster panel shows record (e.g., 12–2) that does not match official standings (e.g., 10–4) for the same league.
+- Roster list appears from an older season/league instance.
+Root causes to address:
+1) Wrong league_id selection for “current” views (using historical/old league_id instead of latest).
+2) Cache TTL too long / no auto-refresh when stale.
+3) Record calculated from the wrong source (e.g., matchups including playoffs/median) instead of official roster settings.
+
+────────────────────────────────────────────────────────────
+A) GUARANTEE “CURRENT” ALWAYS MEANS LATEST LEAGUE INSTANCE
+────────────────────────────────────────────────────────────
+Definitions:
+- A “League Group” = the chain of leagues linked by previous_league_id.
+- “Latest league only” must always resolve to the most recent league_id in that group.
+
+Implement:
+- Create/confirm helper: resolveLatestLeagueId(groupRootLeagueId OR any leagueIdInGroup) -> latestLeagueId
+  - Traverse forward via your stored mapping or rebuild by walking previous_league_id chain.
+  - Always pick the league with the greatest season (and if ties, newest created_at/updated_at).
+
+Apply everywhere:
+- League tile summary (record, PF/PA, roster counts, draft capital summary)
+- League detail roster panel
+- League detail standings panel
+- League detail trade activity + roster activity “Season” scope
+MUST all use the same resolved latestLeagueId when in “Current” mode.
+
+Acceptance:
+- Record shown in roster panel matches official standings for that SAME latestLeagueId.
+
+────────────────────────────────────────────────────────────
+B) FIX RECORD/PF/PA SOURCE OF TRUTH
+────────────────────────────────────────────────────────────
+Do NOT compute W-L from matchups for the default “official record”.
+Use:
+- /league/<league_id>/rosters settings:
+  - wins, losses, ties
+  - fpts, fpts_against (if present)
+
+If fpts/fpts_against missing:
+- compute PF/PA from matchups but ONLY for weeks that exist AND only regular season weeks when possible.
+- Never include playoffs in “official record”.
+
+UI label:
+- “Official record” = roster.settings wins/losses/ties
+- If you have an “H2H computed” metric elsewhere, keep it separate and clearly labeled.
+
+Acceptance:
+- The exact W-L shown on your roster panel matches Sleeper standings list.
+
+────────────────────────────────────────────────────────────
+C) CACHE STALENESS + AUTO-REFRESH FOR CURRENT DATA
+────────────────────────────────────────────────────────────
+Implement cache TTL per dataset:
+- rosters/users: TTL = 15 minutes (max 30)
+- standings (derived from rosters): TTL = same as rosters
+- trades/transactions: TTL = 6 hours (or manual refresh)
+- traded_picks/draft capital: TTL = 6 hours (or manual refresh)
+
+Behavior:
+- When loading a league detail page for latestLeagueId in “Current” mode:
+  - If rosters/users are missing OR stale (older than TTL):
+    - trigger a lightweight sync for that league_id automatically (no user click required)
+    - show subtle “Refreshing…” state until updated
+- Keep manual Refresh button.
+
+Add visible “Last updated” timestamps for:
+- Rosters/Standings
+- Draft capital
+- Trades
+
+Acceptance:
+- Visiting a league detail page refreshes if stale and shows correct current records/rosters.
+
+────────────────────────────────────────────────────────────
+D) DRAFT CAPITAL YEARS ON TILE + CONSISTENT BASE YEARS
+────────────────────────────────────────────────────────────
+Fix missing 2026/2027 by generating baseline years even if no traded_picks exist.
+Rules:
+- baseYears = [league.season, league.season+1, league.season+2]
+- plus any years found in traded_picks for that league.
+Ensure tile draft capital summary uses the same draft_picks_ownership rows as league detail.
+
+Acceptance:
+- Tile shows 2026/2027 counts consistently when appropriate.
+
+────────────────────────────────────────────────────────────
+E) ADD CURRENT vs HISTORY TOGGLE (REQUESTED)
+────────────────────────────────────────────────────────────
+Where:
+- Add a toggle control in the LEAGUE DETAIL header (top right near Refresh):
+  [ Current ] [ History ]
+Default = Current.
+
+What it does:
+- Current mode:
+  - All league detail panels use latestLeagueId only.
+  - “Season” means that latest season only.
+  - Player exposure and compare defaults remain Active/Current unless user opts in.
+- History mode:
+  - League detail panels aggregate across ALL league_ids in the league group chain.
+  - UI must visibly label: “History (N seasons)”
+  - Trades panel becomes grouped/collapsible by season automatically.
+  - Standings/finish history can show a season selector OR a compact list.
+
+Important:
+- Current/History toggle must be a single source of truth (state) used by all tabs inside that league detail page.
+
+Acceptance:
+- Flipping to History changes trades/roster activity/standings to multi-season.
+- Flipping back to Current returns to latest season only.
+
+────────────────────────────────────────────────────────────
+F) ADD “TRADE STYLE + COUNTERPARTY FAVORITES” ON LEAGUE TILE (FEATURE 1)
+────────────────────────────────────────────────────────────
+Add a tiny strip on each league tile (for the viewed user):
+- “Trades: X | Style: <label>”
+- “Top partner: <username>” (optional second line or inline)
+
+Scope rules:
+- If user is viewing Profile main page (all leagues):
+  - Use Current mode by default (latestLeagueId per league group).
+  - If profile has a global History toggle already, respect it; otherwise keep tile default as Current.
+- Trades count = trade transactions involving that roster in that scope.
+- Style = existing label logic (Offseason Builder, Balanced, etc.)
+- Top partner = the roster/user most frequently traded with (handle 3+ team trades by counting each counterparty).
+
+Acceptance:
+- Each league tile shows Trades + Style + Top partner (when trades exist).
+
+────────────────────────────────────────────────────────────
+G) ADD “TARGETS” BUTTON ON LEAGUE TILE (FEATURE 2)
+────────────────────────────────────────────────────────────
+Add a button on each league tile:
+- Text: “Targets”
+- Click behavior:
+  - navigates to Compare/Trade Targeting page
+  - pre-fills:
+    - leagueId = this league’s latestLeagueId (if in Current) OR leagueGroupId (if in History mode)
+    - userA = current profile username
+  - prompts for userB (or uses existing selection)
+  - shows “players you have in this league that userB likes (based on their exposure across active leagues)”
+
+If Compare supports URL params, use:
+- /compare?leagueId=...&mode=current&userA=...
+OR
+- /compare?leagueGroupId=...&mode=history&userA=...
+Implement minimal param support if missing.
+
+Acceptance:
+- Clicking Targets deep-links into actionable trade targeting for that league.
+
+────────────────────────────────────────────────────────────
+H) GOTCHAS (DO NOT SKIP)
+────────────────────────────────────────────────────────────
+1) created_at timestamps may be missing:
+   - fallback grouping by season + round/week; never break UI
+2) multi-team trades exist:
+   - partner counting must handle >2 teams (count each counterparty)
+3) league chains:
+   - never show oldest season in “Current”
+4) record mismatch:
+   - do not use matchups to compute “official record”
+5) rate limiting:
+   - auto-refresh only for stale latest leagues, not entire history.
+
+────────────────────────────────────────────────────────────
+DEBUG REQUIREMENTS (?debug=1)
+────────────────────────────────────────────────────────────
+Show:
+- resolved latestLeagueId + season
+- current/history mode
+- rosters/users last_updated + stale flag
+- record source (“roster.settings” vs fallback)
+- tiles: trades scope + top partner scope
+
+DONE WHEN:
+- Roster panel record matches standings record for latest season in Current mode.
+- League tiles show “Trades | Style | Top partner”.
+- League tiles have “Targets” deep link.
+- League detail has a functioning Current vs History toggle affecting all tabs.

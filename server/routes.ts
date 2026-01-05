@@ -129,6 +129,105 @@ function getCurrentNFLSeason(): number {
   return month <= 1 ? year - 1 : year;
 }
 
+// Compute trade summary for a user in a set of leagues (uses latest league only for "current" mode)
+async function computeTradeSummary(
+  userId: string,
+  latestLeagueId: string,
+  allLeagueIds: string[],
+  userRosters: Array<{ league_id: string; roster_id: number; owner_id: string }>
+): Promise<{ trade_count: number; trading_style: string | null; top_partner: { user_id: string; display_name: string | null; trade_count: number } | null }> {
+  const rosterByLeague = new Map(userRosters.map(r => [r.league_id, r]));
+  
+  let totalTrades = 0;
+  const partnerCounts = new Map<string, { user_id: string; display_name: string | null; count: number }>();
+  const tradeTiming = { offseason: 0, draft_window: 0, inseason: 0, playoffs: 0 };
+  
+  // Only use latest league for tile summary (current mode)
+  const leaguesToScan = [latestLeagueId];
+  
+  for (const leagueId of leaguesToScan) {
+    const userRoster = rosterByLeague.get(leagueId);
+    if (!userRoster) continue;
+    
+    // Pre-fetch league data once per league (avoid N+1)
+    const leagueRosters = await cache.getRostersForLeague(leagueId);
+    const leagueUsers = await cache.getLeagueUsers(leagueId);
+    const rosterToOwner = new Map(leagueRosters.map(r => [r.roster_id, r.owner_id]));
+    const userById = new Map(leagueUsers.map(u => [u.user_id, u]));
+    
+    const trades = await cache.getTradesForLeague(leagueId);
+    for (const trade of trades) {
+      if (trade.status !== "complete") continue;
+      
+      let rosterIds: number[] = [];
+      try {
+        rosterIds = trade.roster_ids ? JSON.parse(trade.roster_ids) : [];
+      } catch { continue; }
+      
+      if (!rosterIds.includes(userRoster.roster_id)) continue;
+      
+      totalTrades++;
+      
+      // Count counterparties using pre-fetched data
+      for (const ridNum of rosterIds) {
+        if (ridNum === userRoster.roster_id) continue;
+        const ownerId = rosterToOwner.get(ridNum);
+        if (!ownerId) continue;
+        
+        const existing = partnerCounts.get(ownerId);
+        if (existing) {
+          existing.count++;
+        } else {
+          const counterUser = userById.get(ownerId);
+          partnerCounts.set(ownerId, {
+            user_id: ownerId,
+            display_name: counterUser?.display_name || null,
+            count: 1,
+          });
+        }
+      }
+      
+      // Trade timing classification (normalize Sleeper's seconds to ms)
+      if (trade.created_at) {
+        const ts = trade.created_at < 1e11 ? trade.created_at * 1000 : trade.created_at;
+        const d = new Date(ts);
+        const month = d.getMonth();
+        // NFL calendar: offseason (Mar-Jul), draft window (Aug-Sep), in-season (Oct-Dec+Jan), playoffs (Jan-Feb)
+        if (month >= 2 && month <= 6) tradeTiming.offseason++;
+        else if (month >= 7 && month <= 8) tradeTiming.draft_window++;
+        else if (month >= 9 || month === 0) tradeTiming.inseason++;
+        else tradeTiming.playoffs++;
+      }
+    }
+  }
+  
+  // Determine trading style
+  let tradingStyle: string | null = null;
+  if (totalTrades > 0) {
+    const maxPhase = Object.entries(tradeTiming).sort((a, b) => b[1] - a[1])[0];
+    if (maxPhase[0] === "offseason" && maxPhase[1] > totalTrades * 0.4) tradingStyle = "Offseason Builder";
+    else if (maxPhase[0] === "draft_window" && maxPhase[1] > totalTrades * 0.4) tradingStyle = "Draft Day Dealer";
+    else if (maxPhase[0] === "inseason" && maxPhase[1] > totalTrades * 0.4) tradingStyle = "In-Season Trader";
+    else if (maxPhase[0] === "playoffs" && maxPhase[1] > totalTrades * 0.4) tradingStyle = "Playoff Push";
+    else tradingStyle = "Balanced";
+  }
+  
+  // Find top partner
+  let topPartner: { user_id: string; display_name: string | null; trade_count: number } | null = null;
+  if (partnerCounts.size > 0) {
+    const sorted = Array.from(partnerCounts.values()).sort((a, b) => b.count - a.count);
+    if (sorted[0]) {
+      topPartner = {
+        user_id: sorted[0].user_id,
+        display_name: sorted[0].display_name,
+        trade_count: sorted[0].count,
+      };
+    }
+  }
+  
+  return { trade_count: totalTrades, trading_style: tradingStyle, top_partner: topPartner };
+}
+
 // Build league groups from cached data
 async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
   const leagues = await cache.getLeaguesForUser(userId);
@@ -205,6 +304,18 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
     const isNotComplete = latestLeague.status !== "complete";
     const isActive = hasRosterInLatest && (isNotComplete || isCurrentSeason);
 
+    // Compute trade summary for this group (uses latest league only)
+    const userRostersForGroup = rosters
+      .filter(r => leagueIds.includes(r.league_id))
+      .map(r => ({ league_id: r.league_id, roster_id: r.roster_id, owner_id: r.owner_id }));
+    
+    const tradeSummary = await computeTradeSummary(
+      userId,
+      latestLeague.league_id,
+      leagueIds,
+      userRostersForGroup
+    );
+
     result.push({
       group_id: groupId,
       name: groupLeagues[0].name, // most recent season name
@@ -216,6 +327,7 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       league_type: leagueType,
       is_active: isActive,
       latest_league_id: latestLeague.league_id,
+      trade_summary: tradeSummary,
     });
   }
 
@@ -974,20 +1086,39 @@ export async function registerRoutes(
   });
 
   // GET /api/group/:groupId/trades - Get trades for a league group
-  // Optional query param: username - filter to only trades involving this user
+  // Optional query params: 
+  //   username - filter to only trades involving this user
+  //   mode - "current" (latest season only) or "history" (all seasons)
   app.get(api.sleeper.trades.path, async (req, res) => {
     try {
       const { groupId } = req.params;
-      const { username } = req.query;
+      const { username, mode } = req.query;
+      const viewMode = mode === "history" ? "history" : "current";
 
       // Get all leagues in this group
       const allLeagues = await cache.getAllLeaguesMap();
       const groupLeagueIds: string[] = [];
+      let maxSeason = "0";
       
       for (const l of allLeagues) {
         const league = await cache.getLeagueById(l.league_id);
         if (league?.group_id === groupId) {
           groupLeagueIds.push(l.league_id);
+          if (league.season && league.season > maxSeason) {
+            maxSeason = league.season;
+          }
+        }
+      }
+      
+      // Filter to latest season if mode is "current"
+      let filteredLeagueIds = groupLeagueIds;
+      if (viewMode === "current" && maxSeason !== "0") {
+        filteredLeagueIds = [];
+        for (const lid of groupLeagueIds) {
+          const league = await cache.getLeagueById(lid);
+          if (league?.season === maxSeason) {
+            filteredLeagueIds.push(lid);
+          }
         }
       }
 
@@ -1003,7 +1134,7 @@ export async function registerRoutes(
         if (cachedUser) {
           userId = cachedUser.user_id;
           userRosterIds = new Map();
-          for (const leagueId of groupLeagueIds) {
+          for (const leagueId of filteredLeagueIds) {
             const roster = await cache.getRosterForUserInLeague(leagueId, userId);
             if (roster) {
               userRosterIds.set(leagueId, roster.roster_id);
@@ -1012,11 +1143,11 @@ export async function registerRoutes(
         }
       }
 
-      // Get trades for all leagues in group
+      // Get trades for leagues (filtered by mode)
       const trades: any[] = [];
       let totalTradesChecked = 0;
       
-      for (const leagueId of groupLeagueIds) {
+      for (const leagueId of filteredLeagueIds) {
         const leagueTrades = await cache.getTradesForLeague(leagueId);
         const league = await cache.getLeagueById(leagueId);
         totalTradesChecked += leagueTrades.length;
@@ -1107,7 +1238,9 @@ export async function registerRoutes(
       res.json({
         group_id: groupId,
         trades,
-        seasons_checked: groupLeagueIds.length,
+        mode: viewMode,
+        seasons_checked: filteredLeagueIds.length,
+        total_seasons_in_group: groupLeagueIds.length,
         total_trades_in_db: totalTradesChecked,
       });
     } catch (e) {
@@ -1421,7 +1554,7 @@ export async function registerRoutes(
 
       // Get league season to determine baseline years
       const league = await cache.getLeagueById(leagueId);
-      const currentSeason = league?.season ? parseInt(league.season, 10) : new Date().getFullYear();
+      const currentSeason = league?.season ?? new Date().getFullYear();
       
       // Always generate baseline years: current season + 2 future years
       const baselineYears = [

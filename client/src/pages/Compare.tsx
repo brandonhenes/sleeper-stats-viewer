@@ -1,21 +1,34 @@
-import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useState, useEffect } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Users, ArrowRight } from "lucide-react";
+import { Users, ArrowRight, Info } from "lucide-react";
 import { Layout } from "@/components/Layout";
 import { motion } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
 
 export default function Compare() {
-  const [userA, setUserA] = useState("");
+  const searchString = useSearch();
+  const params = new URLSearchParams(searchString);
+  const initialUserA = params.get("userA") || "";
+  const leagueIdFromUrl = params.get("leagueId") || "";
+  
+  const [userA, setUserA] = useState(initialUserA);
   const [userB, setUserB] = useState("");
   const [, setLocation] = useLocation();
+  
+  useEffect(() => {
+    if (initialUserA) setUserA(initialUserA);
+  }, [initialUserA]);
 
   const handleCompare = (e: React.FormEvent) => {
     e.preventDefault();
     if (userA.trim() && userB.trim()) {
-      setLocation(`/compare/${userA.trim()}/${userB.trim()}`);
+      const url = leagueIdFromUrl 
+        ? `/compare/${userA.trim()}/${userB.trim()}?leagueId=${leagueIdFromUrl}`
+        : `/compare/${userA.trim()}/${userB.trim()}`;
+      setLocation(url);
     }
   };
 
@@ -34,6 +47,19 @@ export default function Compare() {
               Compare fantasy performance, player exposure, and tendencies between two users.
             </p>
           </div>
+
+          {leagueIdFromUrl && (
+            <div className="mb-6 p-4 bg-muted rounded-md flex items-start gap-3">
+              <Info className="w-5 h-5 text-muted-foreground mt-0.5" />
+              <div>
+                <p className="text-sm font-medium">Targeting for a specific league</p>
+                <p className="text-xs text-muted-foreground">
+                  You're finding trade targets within league {leagueIdFromUrl.slice(0, 8)}...
+                  {initialUserA && ` for ${initialUserA}`}
+                </p>
+              </div>
+            </div>
+          )}
 
           <Card className="p-8">
             <form onSubmit={handleCompare} className="space-y-6">

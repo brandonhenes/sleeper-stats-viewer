@@ -109,6 +109,15 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 5, 2026 (Phase 2.2 UX Enhancements - Latest League Resolution and Debug)
+- **Cache Utilities**: Added resolveLatestLeagueId helper for chain traversal, TTL constants (ROSTERS_TTL=15min, TRADES_TTL=6hr), isStale helper methods
+- **Trade Summary on Tiles**: computeTradeSummary function with pre-fetched rosters/users, timestamp normalization (Sleeper seconds→ms), trading style classification (Offseason Builder, Draft Day Dealer, In-Season Trader, Playoff Push, Balanced), top trading partner
+- **LeagueCard Enhancements**: Shows trade count, trading style badge, top partner display, Targets button for deep-linking to compare page
+- **Compare Page**: Handles userA and leagueId query params from Targets button, shows league context notice
+- **Current/History Toggle**: Added to LeagueGroupDetails header (UI state only - full history scope requires backend work)
+- **Debug Panel**: Enhanced with latestLeagueId, groupId, viewMode, seasons, is_active, trade_count, trading_style, cache_source, needs_sync, last_sync, and limitation note
+- **Known Limitations**: viewMode toggle is UI-only; downstream hooks query latest league only; trade summary uses latest season scope
+
 ### January 5, 2026 (Phase 2.1 UX Polish - Filtering and Timeframe Controls)
 - **Market Trends**: Added timeframe selector (7D/30D/Season/All Time) defaulting to 30D, plus Active/History toggle for league scope filtering
 - **League Trades (TradesSection)**: Defaults to latest season with season-based filtering, newest-first sorting, optional groupId/leagueId props with graceful null handling
