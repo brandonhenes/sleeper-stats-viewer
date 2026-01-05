@@ -118,6 +118,7 @@ export const TTL = {
   TRADES: 6 * 60 * 60 * 1000,
   DRAFT_CAPITAL: 6 * 60 * 60 * 1000,
   USERS: 15 * 60 * 1000,
+  EXPOSURE: 24 * 60 * 60 * 1000,
 };
 
 export const cache = {
@@ -960,6 +961,59 @@ export const cache = {
       trades_updated_at: tradesUpdated,
       trades_stale: this.isTradesStale(tradesUpdated),
     };
+  },
+
+  // Exposure profile methods for trade targeting
+  async getExposureProfile(username: string): Promise<{
+    username: string;
+    season: number;
+    active_league_count: number;
+    exposure_json: Record<string, { count: number; pct: number; pos: string | null }>;
+    last_synced_at: number;
+  } | null> {
+    const result = await db.select()
+      .from(schema.user_exposure_summary)
+      .where(ilike(schema.user_exposure_summary.username, username))
+      .limit(1);
+    if (!result[0]) return null;
+    return {
+      username: result[0].username,
+      season: result[0].season,
+      active_league_count: result[0].active_league_count,
+      exposure_json: result[0].exposure_json as Record<string, { count: number; pct: number; pos: string | null }>,
+      last_synced_at: result[0].last_synced_at,
+    };
+  },
+
+  async upsertExposureProfile(data: {
+    username: string;
+    season: number;
+    active_league_count: number;
+    exposure_json: Record<string, { count: number; pct: number; pos: string | null }>;
+  }): Promise<void> {
+    const now = Date.now();
+    await db.insert(schema.user_exposure_summary)
+      .values({
+        username: data.username.toLowerCase(),
+        season: data.season,
+        active_league_count: data.active_league_count,
+        exposure_json: data.exposure_json,
+        last_synced_at: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.user_exposure_summary.username,
+        set: {
+          season: data.season,
+          active_league_count: data.active_league_count,
+          exposure_json: data.exposure_json,
+          last_synced_at: now,
+        },
+      });
+  },
+
+  isExposureStale(lastSyncedAt: number | null): boolean {
+    if (!lastSyncedAt) return true;
+    return Date.now() - lastSyncedAt > TTL.EXPOSURE;
   },
 };
 
