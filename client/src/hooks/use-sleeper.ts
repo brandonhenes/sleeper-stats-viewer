@@ -645,7 +645,7 @@ interface TargetMeta {
 interface TradeTarget {
   opponent_username: string;
   opponent_display_name: string | null;
-  opponent_user_id?: string;
+  opponent_user_id: string;
   target_score: number;
   matched_assets: MatchedAsset[];
   meta: TargetMeta;
@@ -680,13 +680,21 @@ export function useTradeTargets(username: string | undefined, leagueId: string |
   });
 }
 
-// POST /api/exposure/sync - Sync exposure profile for a user
+// POST /api/exposure/sync - Sync exposure profile for a user (by username or user_id)
 export function useExposureSync() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async (username: string) => {
-      const url = `/api/exposure/sync?username=${encodeURIComponent(username)}`;
+    mutationFn: async (params: { username?: string; user_id?: string }) => {
+      let url: string;
+      if (params.user_id) {
+        url = `/api/exposure/sync?user_id=${encodeURIComponent(params.user_id)}`;
+      } else if (params.username) {
+        url = `/api/exposure/sync?username=${encodeURIComponent(params.username)}`;
+      } else {
+        throw new Error("Username or user_id required");
+      }
+      
       const res = await fetch(url, { method: "POST" });
       
       if (!res.ok) {

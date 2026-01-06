@@ -76,3 +76,23 @@ Preferred communication style: Simple, everyday language.
 ### Environment Variables
 - `DATABASE_URL`: PostgreSQL connection string.
 - `SESSION_SECRET`: For session management (if authentication is implemented).
+
+## Recent Changes
+
+### January 6, 2026 (Phase 2.4 Major UX Overhaul)
+**Placement Accuracy**:
+- Derivation ladder: 1) roster.settings fields (final_rank, playoff_rank) 2) bracket endpoints 3) NULL (never guess)
+- Real bracket data from Sleeper's `/league/:id/winners_bracket` endpoint
+- Source tracking in season summaries ("bracket", "roster_settings", "unknown")
+- Tile placement badges on league cards
+
+**Trade Targets Auto-Sync**:
+- POST /api/exposure/sync accepts `user_id` param for syncing users without cached usernames
+- Auto-sync queue runs when modal opens with concurrency limit (2)
+- Visual row states: Needs sync -> Syncing -> Ready/Failed with progress bar
+
+**Page Reorganization**:
+- Above the fold: Season Result card with Final Finish, Regular Rank, Record, Win%, PF
+- Quick Actions row: Trade Targets, My Roster, Draft Capital, Trade History buttons
+- Tabbed layout: Overview | Teams | Trades | H2H | History
+- Scope labels on every metric (Latest Season, Season-to-Date, etc.)

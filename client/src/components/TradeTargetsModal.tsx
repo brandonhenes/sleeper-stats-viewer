@@ -1,10 +1,12 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Loader2, RefreshCw, AlertCircle, Target, Search, ChevronDown, ChevronUp } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Loader2, RefreshCw, AlertCircle, Target, Search, ChevronDown, ChevronUp, CheckCircle2, XCircle } from "lucide-react";
 import { useTradeTargets, useExposureSync } from "@/hooks/use-sleeper";
+import { useToast } from "@/hooks/use-toast";
 
 interface TradeTargetsModalProps {
   isOpen: boolean;
@@ -13,6 +15,17 @@ interface TradeTargetsModalProps {
   leagueId: string;
   leagueName?: string;
 }
+
+type SyncStatus = "idle" | "syncing" | "success" | "failed";
+
+interface SyncState {
+  [userId: string]: {
+    status: SyncStatus;
+    error?: string;
+  };
+}
+
+const CONCURRENCY_LIMIT = 2;
 
 export function TradeTargetsModal({
   isOpen,
@@ -23,24 +36,113 @@ export function TradeTargetsModal({
 }: TradeTargetsModalProps) {
   const { data, isLoading, error, refetch } = useTradeTargets(username, leagueId);
   const exposureSync = useExposureSync();
-  const [syncingUsers, setSyncingUsers] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
+  
+  const [syncStates, setSyncStates] = useState<SyncState>({});
   const [showAll, setShowAll] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [autoSyncProgress, setAutoSyncProgress] = useState({ current: 0, total: 0, active: false });
+  const autoSyncRanRef = useRef(false);
 
-  const handleSyncUser = async (oppUsername: string) => {
-    setSyncingUsers(prev => new Set(prev).add(oppUsername));
+  const updateSyncState = useCallback((userId: string, status: SyncStatus, error?: string) => {
+    setSyncStates(prev => ({
+      ...prev,
+      [userId]: { status, error }
+    }));
+  }, []);
+
+  const syncUser = useCallback(async (target: { opponent_user_id: string; opponent_username: string; meta: { has_valid_username: boolean } }) => {
+    const userId = target.opponent_user_id;
+    updateSyncState(userId, "syncing");
+    
     try {
-      await exposureSync.mutateAsync(oppUsername);
-      refetch();
-    } catch {
-    } finally {
-      setSyncingUsers(prev => {
-        const next = new Set(prev);
-        next.delete(oppUsername);
-        return next;
+      if (target.meta.has_valid_username) {
+        await exposureSync.mutateAsync({ username: target.opponent_username });
+      } else {
+        await exposureSync.mutateAsync({ user_id: userId });
+      }
+      updateSyncState(userId, "success");
+      return true;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Sync failed";
+      updateSyncState(userId, "failed", errorMsg);
+      return false;
+    }
+  }, [exposureSync, updateSyncState]);
+
+  const handleSyncUser = async (target: { opponent_user_id: string; opponent_username: string; meta: { has_valid_username: boolean } }) => {
+    await syncUser(target);
+    refetch();
+  };
+
+  const runAutoSync = useCallback(async (targets: Array<{ opponent_user_id: string; opponent_username: string; meta: { needs_sync: boolean; has_valid_username: boolean } }>) => {
+    const needsSync = targets.filter(t => t.meta.needs_sync);
+    
+    if (needsSync.length === 0) return;
+    
+    setAutoSyncProgress({ current: 0, total: needsSync.length, active: true });
+    
+    let completed = 0;
+    const queue = [...needsSync];
+    const results: boolean[] = [];
+    
+    const processQueue = async () => {
+      const activePromises: Promise<void>[] = [];
+      
+      while (queue.length > 0 || activePromises.length > 0) {
+        while (activePromises.length < CONCURRENCY_LIMIT && queue.length > 0) {
+          const target = queue.shift()!;
+          const promise = syncUser(target).then(success => {
+            results.push(success);
+            completed++;
+            setAutoSyncProgress(prev => ({ ...prev, current: completed }));
+          }).finally(() => {
+            const idx = activePromises.indexOf(promise);
+            if (idx > -1) activePromises.splice(idx, 1);
+          });
+          activePromises.push(promise);
+        }
+        
+        if (activePromises.length > 0) {
+          await Promise.race(activePromises);
+        }
+      }
+    };
+    
+    await processQueue();
+    
+    const successCount = results.filter(r => r).length;
+    const failCount = results.filter(r => !r).length;
+    
+    if (failCount > 0) {
+      toast({
+        title: "Sync completed with errors",
+        description: `${successCount} synced, ${failCount} failed`,
+        variant: "destructive",
+      });
+    } else if (successCount > 0) {
+      toast({
+        title: "Profiles synced",
+        description: `${successCount} opponent profiles built`,
       });
     }
-  };
+    
+    setAutoSyncProgress(prev => ({ ...prev, active: false }));
+    refetch();
+  }, [syncUser, refetch, toast]);
+
+  useEffect(() => {
+    if (isOpen && data?.targets && !autoSyncRanRef.current) {
+      autoSyncRanRef.current = true;
+      runAutoSync(data.targets);
+    }
+    
+    if (!isOpen) {
+      autoSyncRanRef.current = false;
+      setSyncStates({});
+      setAutoSyncProgress({ current: 0, total: 0, active: false });
+    }
+  }, [isOpen, data?.targets, runAutoSync]);
 
   const formatSyncTime = (timestamp: number | null) => {
     if (!timestamp) return "Never synced";
@@ -49,6 +151,21 @@ export function TradeTargetsModal({
     if (hours < 1) return "< 1h ago";
     if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
+  };
+
+  const getSyncStatusForTarget = (target: { opponent_user_id: string; meta: { needs_sync: boolean; last_synced_at: number | null } }) => {
+    const state = syncStates[target.opponent_user_id];
+    if (!state) {
+      if (target.meta.needs_sync) return { status: "needs_sync" as const, label: "Needs sync" };
+      return { status: "ready" as const, label: formatSyncTime(target.meta.last_synced_at) };
+    }
+    
+    switch (state.status) {
+      case "syncing": return { status: "syncing" as const, label: "Building..." };
+      case "success": return { status: "success" as const, label: "Synced" };
+      case "failed": return { status: "failed" as const, label: state.error || "Failed" };
+      default: return { status: "ready" as const, label: formatSyncTime(target.meta.last_synced_at) };
+    }
   };
 
   const filteredTargets = useMemo(() => {
@@ -81,6 +198,21 @@ export function TradeTargetsModal({
         <p className="text-sm text-muted-foreground mb-3">
           All league opponents ranked by interest in your players (based on their cross-league exposure).
         </p>
+
+        {autoSyncProgress.active && autoSyncProgress.total > 0 && (
+          <div className="mb-4 p-3 rounded-md bg-muted/50" data-testid="auto-sync-progress">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium">Building profiles...</span>
+              <span className="text-sm text-muted-foreground">
+                {autoSyncProgress.current}/{autoSyncProgress.total}
+              </span>
+            </div>
+            <Progress 
+              value={(autoSyncProgress.current / autoSyncProgress.total) * 100} 
+              className="h-2"
+            />
+          </div>
+        )}
 
         {data && data.targets.length > 0 && (
           <div className="relative mb-3">
@@ -116,76 +248,102 @@ export function TradeTargetsModal({
 
         {data && displayedTargets.length > 0 && (
           <div className="space-y-3">
-            {displayedTargets.map((target, idx) => (
-              <div
-                key={target.opponent_username}
-                className="border rounded-md p-3"
-                data-testid={`target-row-${idx}`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">
-                      {target.opponent_display_name || target.opponent_username}
-                    </span>
-                    {target.target_score > 0 && (
-                      <Badge variant="secondary" className="text-xs">
-                        Score: {target.target_score.toFixed(0)}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {target.meta.needs_sync ? (
-                      <span className="text-xs text-amber-500">
-                        {syncingUsers.has(target.opponent_username) ? "Building..." : "Needs sync"}
+            {displayedTargets.map((target, idx) => {
+              const syncStatus = getSyncStatusForTarget(target);
+              const isSyncing = syncStatus.status === "syncing";
+              
+              return (
+                <div
+                  key={target.opponent_user_id}
+                  className="border rounded-md p-3"
+                  data-testid={`target-row-${idx}`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">
+                        {target.opponent_display_name || target.opponent_username}
                       </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {formatSyncTime(target.meta.last_synced_at)}
-                      </span>
-                    )}
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => handleSyncUser(target.opponent_username)}
-                      disabled={syncingUsers.has(target.opponent_username) || !target.meta.has_valid_username}
-                      title={!target.meta.has_valid_username ? "Username not synced yet" : "Refresh exposure profile"}
-                      data-testid={`button-sync-${target.opponent_username}`}
-                    >
-                      {syncingUsers.has(target.opponent_username) ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="w-4 h-4" />
+                      {target.target_score > 0 && (
+                        <Badge variant="secondary" className="text-xs">
+                          Score: {target.target_score.toFixed(0)}
+                        </Badge>
                       )}
-                    </Button>
-                  </div>
-                </div>
-
-                {target.matched_assets.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {target.matched_assets.map((asset) => (
-                      <Badge
-                        key={asset.player_id}
-                        variant="outline"
-                        className="text-xs"
-                        data-testid={`asset-${asset.player_id}`}
-                      >
-                        {asset.name}
-                        {asset.pos && ` (${asset.pos})`}
-                        <span className="ml-1 text-muted-foreground">
-                          {asset.exposure_pct}%
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {syncStatus.status === "syncing" && (
+                        <span className="text-xs text-blue-500 flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Building...
                         </span>
-                      </Badge>
-                    ))}
+                      )}
+                      {syncStatus.status === "success" && (
+                        <span className="text-xs text-green-500 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Synced
+                        </span>
+                      )}
+                      {syncStatus.status === "failed" && (
+                        <span className="text-xs text-destructive flex items-center gap-1">
+                          <XCircle className="w-3 h-3" />
+                          {syncStatus.label}
+                        </span>
+                      )}
+                      {syncStatus.status === "needs_sync" && (
+                        <span className="text-xs text-amber-500">
+                          Needs sync
+                        </span>
+                      )}
+                      {syncStatus.status === "ready" && (
+                        <span className="text-xs text-muted-foreground">
+                          {syncStatus.label}
+                        </span>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => handleSyncUser(target)}
+                        disabled={isSyncing}
+                        title="Refresh exposure profile"
+                        data-testid={`button-sync-${target.opponent_username}`}
+                      >
+                        {isSyncing ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {target.meta.needs_sync
-                      ? "Click sync to build exposure profile"
-                      : "No matching players found"}
-                  </p>
-                )}
-              </div>
-            ))}
+
+                  {target.matched_assets.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {target.matched_assets.map((asset) => (
+                        <Badge
+                          key={asset.player_id}
+                          variant="outline"
+                          className="text-xs"
+                          data-testid={`asset-${asset.player_id}`}
+                        >
+                          {asset.name}
+                          {asset.pos && ` (${asset.pos})`}
+                          <span className="ml-1 text-muted-foreground">
+                            {asset.exposure_pct}%
+                          </span>
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {syncStatus.status === "needs_sync" || syncStatus.status === "syncing"
+                        ? "Building exposure profile..."
+                        : syncStatus.status === "failed"
+                        ? "Retry sync to build profile"
+                        : "No matching players found"}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 

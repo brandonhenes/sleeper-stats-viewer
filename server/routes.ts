@@ -1545,21 +1545,45 @@ export async function registerRoutes(
     }
   });
 
-  // POST /api/exposure/sync - Sync exposure profile for a username
+  // POST /api/exposure/sync - Sync exposure profile for a username or user_id
   app.post("/api/exposure/sync", async (req, res) => {
     try {
-      const { username } = req.query;
+      const { username, user_id } = req.query;
       
-      if (!username || typeof username !== "string") {
-        return res.status(400).json({ message: "Username required" });
+      if (!username && !user_id) {
+        return res.status(400).json({ message: "Username or user_id required" });
       }
 
-      // Fetch user from Sleeper API using existing helper
-      const sleeperUser = await getUserByUsername(username);
-      if (!sleeperUser) {
-        return res.status(404).json({ message: "User not found on Sleeper" });
+      let userId: string;
+      let resolvedUsername: string;
+
+      if (user_id && typeof user_id === "string") {
+        // Fetch user info by user_id from Sleeper
+        const userInfo = await jget(`${BASE}/user/${user_id}`) as any;
+        if (!userInfo || !userInfo.username) {
+          return res.status(404).json({ message: "User not found on Sleeper" });
+        }
+        userId = user_id;
+        resolvedUsername = userInfo.username;
+        
+        // Cache the user so we have their username for next time
+        await cache.upsertUser({
+          user_id: userId,
+          username: resolvedUsername,
+          display_name: userInfo.display_name || resolvedUsername,
+          avatar: userInfo.avatar || null,
+        });
+      } else if (username && typeof username === "string") {
+        // Fetch user from Sleeper API using existing helper
+        const sleeperUser = await getUserByUsername(username);
+        if (!sleeperUser) {
+          return res.status(404).json({ message: "User not found on Sleeper" });
+        }
+        userId = sleeperUser.user_id;
+        resolvedUsername = username;
+      } else {
+        return res.status(400).json({ message: "Invalid parameters" });
       }
-      const userId = sleeperUser.user_id;
 
       // Get current NFL season (approximate)
       const currentYear = new Date().getFullYear();
@@ -1612,14 +1636,14 @@ export async function registerRoutes(
 
       // Save to cache
       await cache.upsertExposureProfile({
-        username: username.toLowerCase(),
+        username: resolvedUsername.toLowerCase(),
         season,
         active_league_count: activeLeagueCount,
         exposure_json: exposureJson,
       });
 
       res.json({
-        username: username.toLowerCase(),
+        username: resolvedUsername.toLowerCase(),
         season,
         active_league_count: activeLeagueCount,
         players_tracked: Object.keys(exposureJson).length,
@@ -1694,71 +1718,123 @@ export async function registerRoutes(
           });
           const regularRank = sortedRosters.findIndex(r => r.roster_id === userRoster.roster_id) + 1;
           
-          // Try to get real playoff finish from Sleeper API bracket endpoints
+          // Try to get real playoff finish using derivation ladder:
+          // 1. Check roster.settings fields (playoff_rank, final_rank, rank, league_rank, finish)
+          // 2. Fetch winners_bracket and losers_bracket endpoints
+          // 3. If no data found, leave finish_place null (never guess)
           let finishPlace: number | null = null;
           let playoffFinish: string | null = null;
           let source: string = "unknown";
           
           try {
-            // Fetch winners bracket from Sleeper API
-            const bracketRes = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/winners_bracket`);
-            
-            if (bracketRes.ok) {
-              const bracket = await bracketRes.json() as Array<{
-                r: number; // round
-                m: number; // match number
-                t1: number | null; // team 1 roster_id
-                t2: number | null; // team 2 roster_id
-                w: number | null; // winner roster_id
-                l: number | null; // loser roster_id
+            // Step 1: Fetch fresh roster data from Sleeper API to get settings
+            const freshRostersRes = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`);
+            if (freshRostersRes.ok) {
+              const freshRosters = await freshRostersRes.json() as Array<{
+                roster_id: number;
+                owner_id: string;
+                settings?: {
+                  wins?: number;
+                  losses?: number;
+                  rank?: number;
+                  final_rank?: number;
+                  playoff_rank?: number;
+                  league_rank?: number;
+                  finish?: number;
+                };
               }>;
               
-              if (bracket && bracket.length > 0) {
-                // Find the final matchup (highest round number)
-                const maxRound = Math.max(...bracket.map(m => m.r));
-                const finalMatchups = bracket.filter(m => m.r === maxRound);
+              const freshUserRoster = freshRosters.find(r => r.owner_id === userId);
+              if (freshUserRoster?.settings) {
+                const settings = freshUserRoster.settings;
+                // Check various rank fields that may indicate playoff finish
+                const rankValue = settings.final_rank ?? settings.playoff_rank ?? settings.finish ?? settings.league_rank;
                 
-                // Champion is the winner of the final round
-                if (finalMatchups.length > 0) {
-                  // Find the championship game (usually match 1 in final round)
-                  const champGame = finalMatchups.find(m => m.m === 1) || finalMatchups[0];
+                if (rankValue && typeof rankValue === "number" && rankValue > 0 && rankValue <= 20) {
+                  finishPlace = rankValue;
+                  source = "roster_settings";
                   
-                  if (champGame && champGame.w !== null) {
-                    if (champGame.w === userRoster.roster_id) {
-                      finishPlace = 1;
-                      playoffFinish = "Champion";
-                      source = "bracket";
-                    } else if (champGame.l === userRoster.roster_id) {
-                      finishPlace = 2;
-                      playoffFinish = "Runner-up";
-                      source = "bracket";
-                    }
+                  // Set playoff finish label based on rank
+                  if (rankValue === 1) {
+                    playoffFinish = "Champion";
+                  } else if (rankValue === 2) {
+                    playoffFinish = "Runner-up";
+                  } else if (rankValue === 3) {
+                    playoffFinish = "3rd";
+                  } else if (rankValue === 4) {
+                    playoffFinish = "4th";
+                  } else if (rankValue <= 6) {
+                    playoffFinish = `${rankValue}th`;
                   }
+                }
+              }
+            }
+          } catch (settingsErr) {
+            console.log(`Failed to fetch roster settings for ${leagueId}:`, settingsErr);
+          }
+          
+          // Step 2: If no settings data, try bracket endpoints
+          if (!finishPlace) {
+            try {
+              const bracketRes = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/winners_bracket`);
+              
+              if (bracketRes.ok) {
+                const bracket = await bracketRes.json() as Array<{
+                  r: number; // round
+                  m: number; // match number
+                  t1: number | null; // team 1 roster_id
+                  t2: number | null; // team 2 roster_id
+                  w: number | null; // winner roster_id
+                  l: number | null; // loser roster_id
+                }>;
+                
+                if (bracket && bracket.length > 0) {
+                  // Find the final matchup (highest round number)
+                  const maxRound = Math.max(...bracket.map(m => m.r));
+                  const finalMatchups = bracket.filter(m => m.r === maxRound);
                   
-                  // Check 3rd place game if exists
-                  if (!finishPlace) {
-                    const thirdPlaceGame = finalMatchups.find(m => m.m === 2);
-                    if (thirdPlaceGame && thirdPlaceGame.w !== null) {
-                      if (thirdPlaceGame.w === userRoster.roster_id) {
-                        finishPlace = 3;
-                        playoffFinish = "3rd";
+                  // Champion is the winner of the final round
+                  if (finalMatchups.length > 0) {
+                    // Find the championship game (usually match 1 in final round)
+                    const champGame = finalMatchups.find(m => m.m === 1) || finalMatchups[0];
+                    
+                    if (champGame && champGame.w !== null) {
+                      if (champGame.w === userRoster.roster_id) {
+                        finishPlace = 1;
+                        playoffFinish = "Champion";
                         source = "bracket";
-                      } else if (thirdPlaceGame.l === userRoster.roster_id) {
-                        finishPlace = 4;
-                        playoffFinish = "4th";
+                      } else if (champGame.l === userRoster.roster_id) {
+                        finishPlace = 2;
+                        playoffFinish = "Runner-up";
                         source = "bracket";
+                      }
+                    }
+                    
+                    // Check 3rd place game if exists
+                    if (!finishPlace) {
+                      const thirdPlaceGame = finalMatchups.find(m => m.m === 2);
+                      if (thirdPlaceGame && thirdPlaceGame.w !== null) {
+                        if (thirdPlaceGame.w === userRoster.roster_id) {
+                          finishPlace = 3;
+                          playoffFinish = "3rd";
+                          source = "bracket";
+                        } else if (thirdPlaceGame.l === userRoster.roster_id) {
+                          finishPlace = 4;
+                          playoffFinish = "4th";
+                          source = "bracket";
+                        }
                       }
                     }
                   }
                 }
               }
+            } catch (bracketErr) {
+              console.log(`Failed to fetch bracket for ${leagueId}:`, bracketErr);
             }
-          } catch (bracketErr) {
-            console.log(`Failed to fetch bracket for ${leagueId}:`, bracketErr);
           }
           
-          // If no bracket data found, leave finish_place null (don't guess)
-          // source remains "unknown" if we couldn't determine from bracket
+          // Step 3: If still no data, leave finish_place null (never guess from regular season rank)
+          // source remains "unknown" if we couldn't determine finish
 
           // Save to cache
           await cache.upsertSeasonSummary({

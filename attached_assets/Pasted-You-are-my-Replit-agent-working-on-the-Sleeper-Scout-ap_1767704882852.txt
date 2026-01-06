@@ -1,0 +1,108 @@
+You are my Replit agent working on the Sleeper Scout app. Behave like a senior engineer shipping a production feature set.
+
+OPERATING MODE
+- Autonomy: HIGH (implement + verify), but do NOT make assumptions about fantasy rules if data is ambiguous.
+- Work in small, testable increments. If scope is large, split into Phase 0, 1, 2 tasks inside THIS response and execute them sequentially.
+- After each phase: run the app and verify UI + API manually (console logs + network calls). If you cannot run tests, at least add debug logs + a “Dev Diagnostics” panel for verification.
+
+NON-NEGOTIABLE RULES
+1) NO GUESSING / NO HALLUCINATED DATA
+   - If you cannot derive a metric from Sleeper endpoints reliably, show “Unknown” and label the scope.
+   - Never label “Champion” unless derived from bracket endpoints OR explicit roster.settings playoff finish fields.
+
+2) DATA SCOPE MUST BE EXPLICIT EVERYWHERE
+   - Every metric must show which scope it uses:
+     - Latest league instance only vs multi-year chain
+     - Season-to-date vs last 30 days vs all-time
+   - UI labels must make this obvious (chips/toggles).
+
+3) PERFORMANCE + RATE LIMIT SAFETY
+   - Cache player map + league fetches with TTL.
+   - Use concurrency limits for batch syncing opponents (2–3 at a time).
+   - Avoid N+1 API patterns. Prefer bulk endpoints.
+
+4) UX FIRST: MINIMIZE CLICKS
+   - Most valuable info should be above the fold.
+   - Don’t bury critical info behind 3 clicks.
+
+PROJECT GOALS (WHAT TO BUILD)
+A) REORDER LEAGUE DETAIL PAGE FOR FLOW
+Current problem: the page is ordered by build history, not user workflow. Reorder as:
+
+ABOVE THE FOLD:
+- League header (name, dynasty/redraft tag, season range, Current/History toggle)
+- Season Result card (Final Finish, Regular rank, Record, Win%, PF/PA)
+- Quick Actions row: Trade Targets, My Roster, Draft Capital, Trade History (jump links)
+
+SECOND ROW (TRADE DECISION ROW):
+- Left: My roster snapshot (collapsed starters/bench + expand)
+- Left: My current pick ownership (2025 only / all future)
+- Right: Trade Targets preview (top 3) with “View all”
+
+TABBED SECTION (reduce scrolling):
+Tabs: Overview | Market | Teams | Trades | Head-to-Head | History
+- Overview: strength/consistency/luck/roster activity/trading style WITH scope labels
+- Market: most traded players/picks, top trade partners, league trade volume
+- Teams: expandable team list with roster + draft capital toggles
+- Trades: trade log + year selector
+- H2H: H2H table
+- History: season-by-season finish table
+
+B) FIX TARGETS “NEEDS SYNC” BUG + AUTO-SYNC
+Problem: Targets modal shows opponents with “Needs sync” but clicking sync does nothing.
+
+Requirements:
+- Implement POST /api/exposure/sync { username } -> returns ok/status/error
+- Wire the sync icon to call that endpoint.
+- Auto-sync missing opponents when the Targets modal opens:
+  - Build a queue, concurrency 2–3
+  - Row states: Needs sync -> Syncing -> Ready OR Failed (retry)
+  - Show progress “Building profiles X/Y”
+- No silent failures: toast + visible row error on failure.
+- Opponent list MUST come from league users, not previously searched usernames.
+
+C) PLAYOFF FINISH / PLACEMENT MUST USE REAL ENDPOINTS
+Store BOTH:
+- regular_rank (always computable)
+- final_finish_place (only if explicit)
+
+Derivation ladder:
+1) Try explicit roster.settings keys (playoff_rank/final_rank/rank/league_rank/finish) if present and valid
+2) Else fetch /league/<id>/winners_bracket and /league/<id>/losers_bracket
+   - Derive Champion ONLY if final matchup winner exists.
+   - Runner-up only if final matchup opponent exists.
+   - Do not fabricate 3rd+ unless bracket explicitly provides it.
+3) Else final_finish_place = NULL (display “Final: Unknown”)
+
+Tile requirement:
+- League tiles must display placement info BEFORE clicking:
+  - If final known: “Finish #X” (Champion if #1)
+  - Else: “Reg Season #X, Final ?”
+
+D) DRAFT CAPITAL CLARITY
+Rename and scope:
+- “Draft Capital (Current Pick Ownership)”
+- Default: latest league instance only, all future years
+- Toggle: 2025 only vs All future
+- Ensure it is NOT “all-time traded picks” unless user selects History mode.
+
+E) ACCEPTANCE TESTS (MUST PASS)
+After implementing, verify these:
+1) League “100 Cap Punishment us 10” does NOT show Champion unless bracket/settings prove it.
+2) Targets modal includes all league mates by default; no dependency on typed usernames.
+3) Clicking sync works and auto-sync runs; row states update.
+4) League tile shows placement without clicking.
+5) Page order matches the flow described above and key info is above the fold.
+
+DELIVERABLES
+- Commit code changes implementing A–D.
+- Add minimal logs and/or a Dev Diagnostics panel showing:
+  - which endpoints were used for placement
+  - whether opponent exposure profiles are cached/synced
+  - current scope toggles for each metric
+
+Now execute Phase 0–2 inside this single run:
+Phase 0: Fix Targets sync endpoint + wiring + auto-sync queue + errors.
+Phase 1: Placement derivation using real endpoints + store fields + tile badges.
+Phase 2: Reorder league page + create tabs + move content to correct tabs + scope labels.
+Stop only when acceptance tests pass or you provide exact errors and where they occur.
