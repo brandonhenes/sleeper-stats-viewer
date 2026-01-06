@@ -131,10 +131,13 @@ export function TradeTargetsModal({
     refetch();
   }, [syncUser, refetch, toast]);
 
+  const runAutoSyncRef = useRef(runAutoSync);
+  runAutoSyncRef.current = runAutoSync;
+
   useEffect(() => {
     if (isOpen && data?.targets && !autoSyncRanRef.current) {
       autoSyncRanRef.current = true;
-      runAutoSync(data.targets);
+      runAutoSyncRef.current(data.targets);
     }
     
     if (!isOpen) {
@@ -142,7 +145,7 @@ export function TradeTargetsModal({
       setSyncStates({});
       setAutoSyncProgress({ current: 0, total: 0, active: false });
     }
-  }, [isOpen, data?.targets, runAutoSync]);
+  }, [isOpen, data?.targets]);
 
   const formatSyncTime = (timestamp: number | null) => {
     if (!timestamp) return "Never synced";

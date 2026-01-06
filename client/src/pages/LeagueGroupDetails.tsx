@@ -22,6 +22,18 @@ import { TeamsSection } from "@/components/TeamsSection";
 import { TradesSection } from "@/components/TradesSection";
 import { TradeTargetsModal } from "@/components/TradeTargetsModal";
 
+function fmtNum(v: unknown, decimals = 1, fallback = "—"): string {
+  if (v == null) return fallback;
+  const num = Number(v);
+  if (Number.isNaN(num)) return fallback;
+  return num.toFixed(decimals);
+}
+
+function fmtPct(v: unknown, decimals = 1, fallback = "—"): string {
+  const formatted = fmtNum(v, decimals, fallback);
+  return formatted === fallback ? fallback : `${formatted}%`;
+}
+
 export default function LeagueGroupDetails() {
   const params = useParams<{ groupId: string; username?: string }>();
   const groupId = params.groupId;
@@ -239,7 +251,7 @@ export default function LeagueGroupDetails() {
                   </div>
                   <div className="text-center p-3 rounded-md bg-muted/30">
                     <div className="text-2xl font-bold">
-                      {selectedSeasonData.pf?.toFixed(0) ?? "-"}
+                      {fmtNum(selectedSeasonData.pf, 0)}
                     </div>
                     <div className="text-xs text-muted-foreground">Points For</div>
                   </div>
@@ -540,8 +552,8 @@ export default function LeagueGroupDetails() {
                             <div className="text-xs text-muted-foreground">All-Play Record</div>
                           </div>
                           <div className="text-center p-3 rounded-md bg-muted/30">
-                            <div className={`text-2xl font-bold ${allPlayData.luck_index > 0 ? 'text-green-500' : allPlayData.luck_index < 0 ? 'text-red-500' : ''}`}>
-                              {allPlayData.luck_index > 0 ? '+' : ''}{allPlayData.luck_index.toFixed(1)}
+                            <div className={`text-2xl font-bold ${(allPlayData.luck_index ?? 0) > 0 ? 'text-green-500' : (allPlayData.luck_index ?? 0) < 0 ? 'text-red-500' : ''}`}>
+                              {(allPlayData.luck_index ?? 0) > 0 ? '+' : ''}{fmtNum(allPlayData.luck_index)}
                             </div>
                             <div className="text-xs text-muted-foreground">Luck Index</div>
                           </div>
@@ -549,11 +561,11 @@ export default function LeagueGroupDetails() {
                         <div className="space-y-2 text-sm">
                           <div className="flex items-center justify-between">
                             <span className="text-muted-foreground">All-Play Win %</span>
-                            <span className="font-mono">{allPlayData.all_play_pct.toFixed(1)}%</span>
+                            <span className="font-mono">{fmtPct(allPlayData.all_play_pct)}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-muted-foreground">Expected Wins</span>
-                            <span className="font-mono">{allPlayData.expected_wins.toFixed(1)}</span>
+                            <span className="font-mono">{fmtNum(allPlayData.expected_wins)}</span>
                           </div>
                         </div>
                       </>
@@ -832,8 +844,8 @@ export default function LeagueGroupDetails() {
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-center">{opp.games}</TableCell>
-                                <TableCell className="text-right font-mono">{opp.pf.toFixed(1)}</TableCell>
-                                <TableCell className="text-right font-mono">{opp.pa.toFixed(1)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtNum(opp.pf)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtNum(opp.pa)}</TableCell>
                               </TableRow>
                             );
                           })}
@@ -891,7 +903,7 @@ export default function LeagueGroupDetails() {
                             </TableCell>
                             <TableCell>{s.regular_rank ? `#${s.regular_rank}` : "-"}</TableCell>
                             <TableCell>{s.finish_place ? `#${s.finish_place}` : "?"}</TableCell>
-                            <TableCell className="font-mono">{s.pf?.toFixed(1) ?? "-"}</TableCell>
+                            <TableCell className="font-mono">{fmtNum(s.pf)}</TableCell>
                             <TableCell>
                               {s.playoff_finish ? (
                                 <Badge variant={s.playoff_finish === "Champion" ? "default" : "outline"}>
