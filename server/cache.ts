@@ -1107,6 +1107,10 @@ export const cache = {
         },
       });
   },
+
+  async testConnection(): Promise<void> {
+    await db.execute(sql`SELECT 1`);
+  },
 };
 
 export default cache;

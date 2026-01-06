@@ -569,6 +569,29 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  // Health check endpoint - tests database connectivity
+  app.get("/api/health", async (req, res) => {
+    try {
+      const start = Date.now();
+      await cache.testConnection();
+      const dbLatency = Date.now() - start;
+      
+      res.json({ 
+        status: "ok", 
+        timestamp: new Date().toISOString(),
+        db_latency_ms: dbLatency,
+        env: process.env.NODE_ENV || "unknown",
+      });
+    } catch (e) {
+      console.error("Health check failed:", e);
+      res.status(500).json({ 
+        status: "error", 
+        error: e instanceof Error ? e.message : "Database connection failed",
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   // GET /api/debug/db - Debug endpoint to check DB counts for a user
   app.get("/api/debug/db", async (req, res) => {
     try {
