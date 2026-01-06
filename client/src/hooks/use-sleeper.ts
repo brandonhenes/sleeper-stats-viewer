@@ -715,6 +715,7 @@ interface SeasonSummary {
   finish_place: number | null;
   regular_rank: number | null;
   playoff_finish: string | null;
+  source: string | null;
   record: SeasonRecord;
   pf: number | null;
   pa: number | null;

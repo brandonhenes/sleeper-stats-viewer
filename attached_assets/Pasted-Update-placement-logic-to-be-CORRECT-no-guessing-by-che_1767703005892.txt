@@ -1,0 +1,117 @@
+Update placement logic to be CORRECT (no guessing) by checking real Sleeper endpoints for playoff outcomes. Also surface placement on league tiles (before clicking).
+
+GOALS
+1) Show accurate “Finish / Champion” based on real playoff results when possible.
+2) If playoff results cannot be derived from explicit data, show “Final: Unknown” (never guess).
+3) Always show placement info on the league tiles (most recent season default).
+
+────────────────────────────────────────
+A) DATA DEFINITIONS (STORE BOTH)
+────────────────────────────────────────
+We store two separate ranks per league season instance:
+
+1) regular_rank (always computable):
+- Rank teams by regular-season performance (wins desc, ties, then PF desc). Use roster.settings for wins/losses/ties/PF.
+- Label as “Reg Season: #X”
+
+2) final_finish_place (ONLY if derived from explicit playoff outcome):
+- Determine champion/placement using playoff bracket results endpoints OR explicit roster.settings fields that represent playoff finish.
+- If not determinable -> NULL (display “Final: Unknown”)
+
+NEVER infer Champion from regular_rank.
+
+DB table: league_season_summary
+- league_id TEXT
+- season INT
+- username TEXT
+- roster_id INT
+- wins INT, losses INT, ties INT
+- pf NUMERIC, pa NUMERIC
+- regular_rank INT NOT NULL
+- final_finish_place INT NULL
+- playoff_label TEXT NULL (Champion/Runner-up/etc if known)
+- source TEXT (e.g., "bracket", "roster_settings", "unknown")
+- updated_at TIMESTAMP
+PK: (league_id, username)
+
+────────────────────────────────────────
+B) PLAYOFF OUTCOME: CHECK REAL ENDPOINTS (IN ORDER)
+────────────────────────────────────────
+For each league_id (season instance), determine final finish using this ladder:
+
+Step 1: Read league settings to know playoff structure
+- Fetch /league/<league_id>
+- Identify:
+  - playoff teams count (if present)
+  - playoff_type (if present)
+  - last regular season week (if present)
+
+Step 2: Try explicit roster.settings playoff fields FIRST (if they exist)
+- Fetch /league/<league_id>/rosters
+- Check candidate keys on roster.settings for playoff finish:
+  - playoff_rank
+  - final_rank
+  - rank
+  - league_rank
+  - finish
+(Use defensive checks; if one key is present and looks like 1..N, accept it.)
+If found for my roster_id:
+- final_finish_place = that value
+- source="roster_settings"
+- If value==1 => playoff_label="Champion"
+
+Step 3: If not found, use BRACKET endpoints to derive champion
+- Attempt to fetch:
+  - /league/<league_id>/winners_bracket
+  - /league/<league_id>/losers_bracket
+(These endpoints should return matchups with roster_id references and winners.)
+
+Champion derivation rule (no guessing):
+- If winners_bracket exists and contains a final matchup with a winner roster_id:
+  - champion_roster_id = winner roster_id of the final
+  - set champion’s final_finish_place=1 and playoff_label="Champion"
+- For runner-up:
+  - the opponent roster_id in that final matchup gets final_finish_place=2 and playoff_label="Runner-up"
+- For other placements:
+  - Only set final_finish_place if bracket data explicitly defines it (e.g., 3rd place game exists).
+  - Otherwise leave NULL for non-top-2 teams (do not fabricate full ordering).
+
+If bracket endpoints return empty or missing winner fields:
+- final_finish_place remains NULL
+- source="unknown"
+
+Step 4: Cache and never spam
+- Cache league_season_summary; refresh on manual Sync or TTL (24h).
+- Do not repeatedly re-fetch bracket endpoints on every tile render; compute once during sync.
+
+────────────────────────────────────────
+C) TILE DISPLAY (BEFORE CLICKING INTO LEAGUE)
+────────────────────────────────────────
+On the league tiles page:
+- Use MOST RECENT league season instance (latest league_id in that group).
+- Show a placement badge:
+
+If final_finish_place is known:
+  - badge: “Finish: #<final_finish_place>”
+  - if #1 also show “Champion”
+Else:
+  - badge: “Reg Season: #<regular_rank>”
+  - small text: “Final: ?”
+
+This must appear on the tiles without clicking into league details.
+
+Also add a small dropdown on tile (optional, if easy):
+- “Season: <most recent>” with ability to view prior seasons’ finish quickly
+But minimum requirement: most recent season placement visible on tile.
+
+────────────────────────────────────────
+D) ACCEPTANCE TESTS
+────────────────────────────────────────
+1) League “100 Cap Punishment us 10” must not show Champion unless bracket or explicit playoff field indicates it.
+2) Champion label must come ONLY from:
+   - final_finish_place == 1 from roster_settings OR
+   - winners_bracket final winner
+3) Tiles must show placement badges before clicking into leagues.
+4) If bracket endpoints fail/missing, app shows “Final: Unknown” (no guessing).
+
+Implement minimally using existing code style, DB, and sync flow.

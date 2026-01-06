@@ -845,9 +845,11 @@ export default function LeagueGroupDetails() {
                     </div>
                     <div className="text-center p-3 rounded-md bg-muted/30">
                       <div className="text-2xl font-bold">
-                        {selectedSeasonData.finish_place ? `#${selectedSeasonData.finish_place}` : "-"}
+                        {selectedSeasonData.finish_place ? `#${selectedSeasonData.finish_place}` : "?"}
                       </div>
-                      <div className="text-xs text-muted-foreground">Final Finish</div>
+                      <div className="text-xs text-muted-foreground">
+                        {selectedSeasonData.finish_place ? "Final Finish" : "Final: Unknown"}
+                      </div>
                     </div>
                     <div className="text-center p-3 rounded-md bg-muted/30">
                       <div className="text-2xl font-bold">

@@ -53,9 +53,29 @@ export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps
                   <Calendar className="w-3 h-3" />
                   {formatYears()}
                 </Badge>
-                <Badge variant="outline" className="bg-accent/20 text-accent-foreground border-accent/30 font-mono font-bold">
-                  {formatRecord()}
-                </Badge>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {group.placement && (
+                    <Badge 
+                      variant={group.placement.playoff_finish === "Champion" ? "default" : "outline"}
+                      className="gap-1"
+                      data-testid={`badge-placement-${group.group_id}`}
+                    >
+                      {group.placement.playoff_finish === "Champion" ? (
+                        <>
+                          <Trophy className="w-3 h-3" />
+                          Champion
+                        </>
+                      ) : group.placement.finish_place ? (
+                        `#${group.placement.finish_place}`
+                      ) : group.placement.regular_rank ? (
+                        `Reg: #${group.placement.regular_rank}`
+                      ) : null}
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="bg-accent/20 text-accent-foreground border-accent/30 font-mono font-bold">
+                    {formatRecord()}
+                  </Badge>
+                </div>
               </div>
 
               <h3 className="text-xl font-display font-bold text-foreground group-hover:text-primary transition-colors line-clamp-2">

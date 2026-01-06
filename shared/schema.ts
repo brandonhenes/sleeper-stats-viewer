@@ -174,9 +174,10 @@ export const league_season_summary = pgTable("league_season_summary", {
   user_id: text("user_id").notNull(),
   season: integer("season").notNull(),
   roster_id: integer("roster_id"),
-  finish_place: integer("finish_place"), // null if unknown
-  regular_rank: integer("regular_rank"), // regular season standing
-  playoff_finish: text("playoff_finish"), // "Champion", "Runner-up", "3rd", "Missed playoffs", etc
+  finish_place: integer("finish_place"), // null if unknown - ONLY from real playoff data
+  regular_rank: integer("regular_rank"), // regular season standing (always computable)
+  playoff_finish: text("playoff_finish"), // "Champion", "Runner-up", "3rd", etc - ONLY from real data
+  source: text("source"), // "bracket", "roster_settings", "unknown" - where finish data came from
   wins: integer("wins").notNull().default(0),
   losses: integer("losses").notNull().default(0),
   ties: integer("ties").notNull().default(0),
@@ -227,6 +228,15 @@ export const tradeSummarySchema = z.object({
   }).nullable(),
 });
 
+// Season placement info for display on league tiles
+export const seasonPlacementSchema = z.object({
+  season: z.number(),
+  regular_rank: z.number().nullable(),
+  finish_place: z.number().nullable(), // only if known from bracket data
+  playoff_finish: z.string().nullable(), // "Champion", "Runner-up", etc - only if known
+  source: z.string().nullable(), // "bracket", "roster_settings", "unknown"
+});
+
 export const leagueGroupSchema = z.object({
   group_id: z.string(),
   name: z.string(), // most recent season name
@@ -239,6 +249,7 @@ export const leagueGroupSchema = z.object({
   is_active: z.boolean().optional(), // true if user has roster in latest season and league is active
   latest_league_id: z.string().optional(), // the latest league_id for this group
   trade_summary: tradeSummarySchema.optional(), // trade stats for this group
+  placement: seasonPlacementSchema.optional(), // most recent season placement for display on tile
 });
 
 // Original league schema (kept for backwards compatibility)

@@ -316,6 +316,20 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       userRostersForGroup
     );
 
+    // Get placement info for the most recent season
+    let placement: { season: number; regular_rank: number | null; finish_place: number | null; playoff_finish: string | null; source: string | null } | undefined;
+    const latestSummaries = await cache.getSeasonSummaries([latestLeague.league_id], userId);
+    if (latestSummaries.length > 0) {
+      const s = latestSummaries[0];
+      placement = {
+        season: s.season,
+        regular_rank: s.regular_rank,
+        finish_place: s.finish_place,
+        playoff_finish: s.playoff_finish,
+        source: s.source,
+      };
+    }
+
     result.push({
       group_id: groupId,
       name: groupLeagues[0].name, // most recent season name
@@ -328,6 +342,7 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       is_active: isActive,
       latest_league_id: latestLeague.league_id,
       trade_summary: tradeSummary,
+      placement,
     });
   }
 
@@ -1679,16 +1694,71 @@ export async function registerRoutes(
           });
           const regularRank = sortedRosters.findIndex(r => r.roster_id === userRoster.roster_id) + 1;
           
-          // Finish place is calculated rank (we don't have playoff data in cache)
-          const finishPlace = regularRank > 0 ? regularRank : null;
-          
-          // Playoff finish text based on rank
+          // Try to get real playoff finish from Sleeper API bracket endpoints
+          let finishPlace: number | null = null;
           let playoffFinish: string | null = null;
-          if (finishPlace === 1) playoffFinish = "Champion";
-          else if (finishPlace === 2) playoffFinish = "Runner-up";
-          else if (finishPlace === 3) playoffFinish = "3rd";
-          else if (finishPlace !== null && finishPlace <= 4) playoffFinish = "4th";
-          else if (finishPlace !== null) playoffFinish = "Unknown";
+          let source: string = "unknown";
+          
+          try {
+            // Fetch winners bracket from Sleeper API
+            const bracketRes = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/winners_bracket`);
+            
+            if (bracketRes.ok) {
+              const bracket = await bracketRes.json() as Array<{
+                r: number; // round
+                m: number; // match number
+                t1: number | null; // team 1 roster_id
+                t2: number | null; // team 2 roster_id
+                w: number | null; // winner roster_id
+                l: number | null; // loser roster_id
+              }>;
+              
+              if (bracket && bracket.length > 0) {
+                // Find the final matchup (highest round number)
+                const maxRound = Math.max(...bracket.map(m => m.r));
+                const finalMatchups = bracket.filter(m => m.r === maxRound);
+                
+                // Champion is the winner of the final round
+                if (finalMatchups.length > 0) {
+                  // Find the championship game (usually match 1 in final round)
+                  const champGame = finalMatchups.find(m => m.m === 1) || finalMatchups[0];
+                  
+                  if (champGame && champGame.w !== null) {
+                    if (champGame.w === userRoster.roster_id) {
+                      finishPlace = 1;
+                      playoffFinish = "Champion";
+                      source = "bracket";
+                    } else if (champGame.l === userRoster.roster_id) {
+                      finishPlace = 2;
+                      playoffFinish = "Runner-up";
+                      source = "bracket";
+                    }
+                  }
+                  
+                  // Check 3rd place game if exists
+                  if (!finishPlace) {
+                    const thirdPlaceGame = finalMatchups.find(m => m.m === 2);
+                    if (thirdPlaceGame && thirdPlaceGame.w !== null) {
+                      if (thirdPlaceGame.w === userRoster.roster_id) {
+                        finishPlace = 3;
+                        playoffFinish = "3rd";
+                        source = "bracket";
+                      } else if (thirdPlaceGame.l === userRoster.roster_id) {
+                        finishPlace = 4;
+                        playoffFinish = "4th";
+                        source = "bracket";
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch (bracketErr) {
+            console.log(`Failed to fetch bracket for ${leagueId}:`, bracketErr);
+          }
+          
+          // If no bracket data found, leave finish_place null (don't guess)
+          // source remains "unknown" if we couldn't determine from bracket
 
           // Save to cache
           await cache.upsertSeasonSummary({
@@ -1699,6 +1769,7 @@ export async function registerRoutes(
             finish_place: finishPlace,
             regular_rank: regularRank,
             playoff_finish: playoffFinish,
+            source,
             wins,
             losses,
             ties,
@@ -1723,6 +1794,7 @@ export async function registerRoutes(
           finish_place: s.finish_place,
           regular_rank: s.regular_rank,
           playoff_finish: s.playoff_finish,
+          source: s.source,
           record: { wins: s.wins, losses: s.losses, ties: s.ties },
           pf: s.pf,
           pa: s.pa,

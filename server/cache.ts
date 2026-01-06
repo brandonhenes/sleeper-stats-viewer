@@ -1025,6 +1025,7 @@ export const cache = {
     finish_place: number | null;
     regular_rank: number | null;
     playoff_finish: string | null;
+    source: string | null;
     wins: number;
     losses: number;
     ties: number;
@@ -1046,6 +1047,7 @@ export const cache = {
       finish_place: r.finish_place,
       regular_rank: r.regular_rank,
       playoff_finish: r.playoff_finish,
+      source: r.source,
       wins: r.wins,
       losses: r.losses,
       ties: r.ties,
@@ -1062,6 +1064,7 @@ export const cache = {
     finish_place?: number | null;
     regular_rank?: number | null;
     playoff_finish?: string | null;
+    source?: string | null;
     wins: number;
     losses: number;
     ties: number;
@@ -1078,6 +1081,7 @@ export const cache = {
         finish_place: data.finish_place ?? null,
         regular_rank: data.regular_rank ?? null,
         playoff_finish: data.playoff_finish ?? null,
+        source: data.source ?? null,
         wins: data.wins,
         losses: data.losses,
         ties: data.ties,
@@ -1093,6 +1097,7 @@ export const cache = {
           finish_place: data.finish_place ?? null,
           regular_rank: data.regular_rank ?? null,
           playoff_finish: data.playoff_finish ?? null,
+          source: data.source ?? null,
           wins: data.wins,
           losses: data.losses,
           ties: data.ties,
