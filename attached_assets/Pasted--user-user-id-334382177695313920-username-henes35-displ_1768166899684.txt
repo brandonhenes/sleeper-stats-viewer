@@ -1,0 +1,1194 @@
+{
+  "user": {
+    "user_id": "334382177695313920",
+    "username": "henes35",
+    "display_name": "henes35",
+    "avatar": "dd7d583f04af049731702d42e15c5c3f"
+  },
+  "league_groups": [
+    {
+      "group_id": "1180274331640688640",
+      "name": "Reckless Abandon",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180274331640688640"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180274331640688640",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180754808151150592",
+      "name": "300 T🤢xic Ma$culinity ",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180754808151150592"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180754808151150592",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180240654498844672",
+      "name": "Raging Dyno",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180240654498844672"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180240654498844672",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1181612925579264000",
+      "name": "The Trading Post - Dynasty",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1181612925579264000"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1181612925579264000",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1185317993901383680",
+      "name": "12 Gs",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1185317993901383680"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1185317993901383680",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1182533159787270144",
+      "name": "DOPE (Dynasty Of Pretend Experts)",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1182533159787270144"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1182533159787270144",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1186167731716055040",
+      "name": "Dirty Blumkins",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1186167731716055040"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1186167731716055040",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1182532868898344960",
+      "name": "75 Politically Incorrect Assholes",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1182532868898344960"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1182532868898344960",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1196901204811071488",
+      "name": "Let The Boy Watch",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1196901204811071488"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1196901204811071488",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1181370467124641792",
+      "name": "Rebel Base",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1181370467124641792"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1181370467124641792",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180068889403080704",
+      "name": "The Gentleman’s Club",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180068889403080704"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180068889403080704",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1184362103623540736",
+      "name": "100 Gender Queers 🏳️‍⚧️",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1184362103623540736"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1184362103623540736",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1185440043295154176",
+      "name": "100 Capital Punishment 🇺🇸 ",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1185440043295154176"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1185440043295154176",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180284315602690048",
+      "name": "Farts and Boners Fantasy",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180284315602690048"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180284315602690048",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180240794908090368",
+      "name": "Dynastycore",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180240794908090368"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180240794908090368",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1194573753010569216",
+      "name": "Degenerates ‘R Us Empire",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1194573753010569216"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1194573753010569216",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1214448574868242432",
+      "name": "Powder Puff Film Rats",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1214448574868242432"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1214448574868242432",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1207182722162774016",
+      "name": "A Jun/jul 🦁Hakuna Matata IV 🦁 Rookie Draft July",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1207182722162774016"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1207182722162774016",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1187263901108228096",
+      "name": "Frantic Football Freaks.",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1187263901108228096"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1187263901108228096",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1185791074008723456",
+      "name": "60 ManBear SlamPigs",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1185791074008723456"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1185791074008723456",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1185067346489708544",
+      "name": "50 Baby Daddys",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1185067346489708544"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1185067346489708544",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1184369730268393472",
+      "name": "50 Cock Gobblers 🍆 ",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1184369730268393472"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1184369730268393472",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1183372842254270464",
+      "name": "Even More Dick Dynasty",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1183372842254270464"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1183372842254270464",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1183304195575070720",
+      "name": "76 Fuck Off Lib 💩 ",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1183304195575070720"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1183304195575070720",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1183127280453349376",
+      "name": "The 32 Team Grim Reaper",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1183127280453349376"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1183127280453349376",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1182508101176512512",
+      "name": "$50 4th and Fantasy Dynasty Football League",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1182508101176512512"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1182508101176512512",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1182461940302708736",
+      "name": "Dirty Laundry",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1182461940302708736"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1182461940302708736",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180762801315426304",
+      "name": "76 Spread Eagle 🦅",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180762801315426304"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180762801315426304",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180217050295140352",
+      "name": "SipDhits",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180217050295140352"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180217050295140352",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180087061426847744",
+      "name": "This League Fucks ",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180087061426847744"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1180087061426847744",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1180194012506259456",
+      "name": "Joe Buck Yourself",
+      "min_season": 2025,
+      "max_season": 2025,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1180194012506259456"
+      ],
+      "league_type": "redraft",
+      "is_active": false,
+      "latest_league_id": "1180194012506259456",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1104509730707415040",
+      "name": "Reckless Abandon",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1104509730707415040"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1104509730707415040",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1076339561850056704",
+      "name": "50 Cock Gobblers 🍆 ",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1076339561850056704"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1076339561850056704",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1060708908823572480",
+      "name": "Dirty Laundry",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1060708908823572480"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1060708908823572480",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048302365796900864",
+      "name": "The Tightest of Ends",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048302365796900864"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048302365796900864",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048050555580674048",
+      "name": "The Trading Post - Dynasty",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048050555580674048"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048050555580674048",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1050535743292071936",
+      "name": "Frantic Football Freaks.",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1050535743292071936"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1050535743292071936",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048885306730074112",
+      "name": "The Boys: SF-TEP Dynasty ",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048885306730074112"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048885306730074112",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048823101057904640",
+      "name": "AL 🦁Hakuna Matata IV 🦁 Rookie Draft July",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048823101057904640"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048823101057904640",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048740073434365952",
+      "name": "Marvel vs DC",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048740073434365952"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048740073434365952",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048526874814590976",
+      "name": "Brews and Shrooms",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048526874814590976"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048526874814590976",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048353698029703168",
+      "name": "Joe Buck Yourself",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048353698029703168"
+      ],
+      "league_type": "redraft",
+      "is_active": false,
+      "latest_league_id": "1048353698029703168",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048353923309862912",
+      "name": "300 T🤢xic Ma$culinity ",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048353923309862912"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048353923309862912",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1097939418213617664",
+      "name": "Raging Dyno",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1097939418213617664"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1097939418213617664",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1065510212158853120",
+      "name": "100 Capital Punishment 🇺🇸 ",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1065510212158853120"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1065510212158853120",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1078861194481647616",
+      "name": "100 Gender Queers 🏳️‍⚧️",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1078861194481647616"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1078861194481647616",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048302227166793728",
+      "name": "12 Gs",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048302227166793728"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048302227166793728",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1049457826323816448",
+      "name": "Dynastycore",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1049457826323816448"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1049457826323816448",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048182656434917376",
+      "name": "Farts and Boners Fantasy",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048182656434917376"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048182656434917376",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1127859950778269696",
+      "name": "Degenerates ‘R Us Empire",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1127859950778269696"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1127859950778269696",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1123410497061150720",
+      "name": "76 Spread Eagle 🦅",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1123410497061150720"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1123410497061150720",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1117992785807835136",
+      "name": "76 Fuck Off Lib 💩 ",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1117992785807835136"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1117992785807835136",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1057439632486445056",
+      "name": "75 Politically Incorrect Assholes",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1057439632486445056"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1057439632486445056",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1084160444669026304",
+      "name": "Even More Dick Dynasty",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1084160444669026304"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1084160444669026304",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1116211615646576640",
+      "name": "Rebel Base",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1116211615646576640"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1116211615646576640",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1071603912068722688",
+      "name": "60 ManBear SlamPigs",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1071603912068722688"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1071603912068722688",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048302289418661888",
+      "name": "DOPE (Dynasty Of Pretend Experts)",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048302289418661888"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048302289418661888",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1108222101342851072",
+      "name": "50 Baby Daddys",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1108222101342851072"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1108222101342851072",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1043612506847068160",
+      "name": "The 32 Team Grim Reaper",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1043612506847068160"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1043612506847068160",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1049548495839367168",
+      "name": "Dirty Blumkins",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1049548495839367168"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1049548495839367168",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1048255258595524608",
+      "name": "SipDhits",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1048255258595524608"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1048255258595524608",
+      "trade_summary": null
+    },
+    {
+      "group_id": "1053044823181168640",
+      "name": "This League Fucks",
+      "min_season": 2024,
+      "max_season": 2024,
+      "seasons_count": 1,
+      "overall_record": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0
+      },
+      "league_ids": [
+        "1053044823181168640"
+      ],
+      "league_type": "dynasty",
+      "is_active": false,
+      "latest_league_id": "1053044823181168640",
+      "trade_summary": null
+    }
+  ],
+  "cached": false,
+  "needs_sync": true,
+  "sync_status": "not_started",
+  "storage_mode": "no-db",
+  "degraded": true,
+  "hint": "Database unavailable - showing basic league data from Sleeper. Some features like trade history and head-to-head records are disabled."
+}

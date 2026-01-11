@@ -92,7 +92,7 @@ async function getTradedPicks(leagueId: string) {
 }
 
 // Fetch user's leagues directly from Sleeper API (for no-db fallback mode)
-// Returns simplified league groups structure
+// Returns simplified league groups structure with actual roster records
 async function fetchLeaguesFromSleeperDirect(userId: string, username: string): Promise<any[]> {
   const currentSeason = getCurrentNFLSeason();
   const seasons = [currentSeason, currentSeason - 1];
@@ -109,20 +109,60 @@ async function fetchLeaguesFromSleeperDirect(userId: string, username: string): 
     }
   }
 
-  // Group by league_id (simple grouping without previous_league_id chains)
-  const leagueGroups = allLeagues.map((league: any) => ({
-    group_id: league.league_id,
-    name: league.name,
-    min_season: parseInt(league.season),
-    max_season: parseInt(league.season),
-    seasons_count: 1,
-    overall_record: { wins: 0, losses: 0, ties: 0 },
-    league_ids: [league.league_id],
-    league_type: league.settings?.type === 2 ? "dynasty" : "redraft",
-    is_active: league.status === "in_season" || league.status === "pre_draft" || league.status === "drafting",
-    latest_league_id: league.league_id,
-    trade_summary: null,
-  }));
+  // Fetch rosters for each league with concurrency limit to avoid rate limits
+  const leagueRosters = new Map<string, any>();
+  const CONCURRENCY_LIMIT = 4;
+  
+  const fetchRosterBatch = async (leagues: any[]) => {
+    const results: Promise<void>[] = [];
+    for (let i = 0; i < leagues.length; i += CONCURRENCY_LIMIT) {
+      const batch = leagues.slice(i, i + CONCURRENCY_LIMIT);
+      await Promise.all(batch.map(async (league) => {
+        try {
+          const rosters = await getLeagueRosters(league.league_id);
+          if (rosters && Array.isArray(rosters)) {
+            // Find user's roster
+            const userRoster = rosters.find((r: any) => r.owner_id === userId);
+            if (userRoster) {
+              leagueRosters.set(league.league_id, userRoster);
+            }
+          }
+        } catch (e) {
+          console.warn(`[no-db] Failed to fetch rosters for league ${league.league_id}:`, e);
+        }
+      }));
+      // Small delay between batches to respect rate limits
+      if (i + CONCURRENCY_LIMIT < leagues.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+  };
+  
+  await fetchRosterBatch(allLeagues);
+
+  // Group by league_id with actual roster data
+  const leagueGroups = allLeagues.map((league: any) => {
+    const roster = leagueRosters.get(league.league_id);
+    const settings = roster?.settings || {};
+    
+    return {
+      group_id: league.league_id,
+      name: league.name,
+      min_season: parseInt(league.season),
+      max_season: parseInt(league.season),
+      seasons_count: 1,
+      overall_record: {
+        wins: settings.wins || 0,
+        losses: settings.losses || 0,
+        ties: settings.ties || 0,
+      },
+      league_ids: [league.league_id],
+      league_type: league.settings?.type === 2 ? "dynasty" : "redraft",
+      is_active: roster !== undefined && (league.status === "in_season" || league.status === "pre_draft" || league.status === "drafting"),
+      latest_league_id: league.league_id,
+      trade_summary: null,
+    };
+  });
 
   return leagueGroups;
 }
