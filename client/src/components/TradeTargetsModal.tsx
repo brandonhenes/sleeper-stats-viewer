@@ -39,7 +39,7 @@ export function TradeTargetsModal({
   const { toast } = useToast();
   
   const [syncStates, setSyncStates] = useState<SyncState>({});
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useState(true); // Show all opponents by default
   const [searchQuery, setSearchQuery] = useState("");
   const [autoSyncProgress, setAutoSyncProgress] = useState({ current: 0, total: 0, active: false });
   const autoSyncRanRef = useRef(false);
@@ -70,8 +70,15 @@ export function TradeTargetsModal({
     }
   }, [exposureSync, updateSyncState]);
 
-  const handleSyncUser = async (target: { opponent_user_id: string; opponent_username: string; meta: { has_valid_username: boolean } }) => {
-    await syncUser(target);
+  const handleSyncUser = async (target: { opponent_user_id: string; opponent_username: string; opponent_display_name?: string | null; meta: { has_valid_username: boolean } }) => {
+    const success = await syncUser(target);
+    if (!success) {
+      toast({
+        title: "Sync failed",
+        description: `Failed to build profile for ${target.opponent_display_name || target.opponent_username}. Click refresh to retry.`,
+        variant: "destructive",
+      });
+    }
     refetch();
   };
 
@@ -350,27 +357,24 @@ export function TradeTargetsModal({
           </div>
         )}
 
-        {hasMore && !showAll && (
+        {hasMore && (
           <Button
             variant="ghost"
             className="w-full mt-2 gap-2"
-            onClick={() => setShowAll(true)}
-            data-testid="button-show-all-targets"
+            onClick={() => setShowAll(!showAll)}
+            data-testid="button-toggle-targets"
           >
-            <ChevronDown className="w-4 h-4" />
-            Show all ({filteredTargets.length})
-          </Button>
-        )}
-
-        {showAll && hasMore && (
-          <Button
-            variant="ghost"
-            className="w-full mt-2 gap-2"
-            onClick={() => setShowAll(false)}
-            data-testid="button-collapse-targets"
-          >
-            <ChevronUp className="w-4 h-4" />
-            Show less
+            {showAll ? (
+              <>
+                <ChevronUp className="w-4 h-4" />
+                Show fewer
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-4 h-4" />
+                Show all ({filteredTargets.length})
+              </>
+            )}
           </Button>
         )}
 
