@@ -63,6 +63,7 @@ function getDatabaseUrl(): string | null {
 let connectionString: string | null = null;
 let dbInitError: Error | null = null;
 let storageMode: StorageMode = "no-db";
+let dbVerified = false;
 
 try {
   connectionString = getDatabaseUrl();
@@ -75,9 +76,9 @@ try {
   storageMode = "no-db";
 }
 
-export const pool = connectionString ? new Pool({ 
+export let pool: pg.Pool | null = connectionString ? new Pool({ 
   connectionString,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: 5000, // Reduced for faster failure detection
   idleTimeoutMillis: 30000,
   max: 10,
 }) : null;
@@ -88,7 +89,38 @@ if (pool) {
   });
 }
 
-export const db = pool ? drizzle(pool, { schema }) : null;
-export { dbInitError, storageMode };
+export let db = pool ? drizzle(pool, { schema }) : null;
 
-console.log(`[db] Storage mode: ${storageMode}`);
+// Async function to verify DB connection at startup
+// If connection fails, switch to no-db mode
+export async function verifyDbConnection(): Promise<boolean> {
+  if (dbVerified) return storageMode === "postgres";
+  if (!pool) {
+    dbVerified = true;
+    return false;
+  }
+  
+  try {
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    console.log('[db] Database connection verified successfully');
+    dbVerified = true;
+    return true;
+  } catch (e) {
+    console.error('[db] Database connection failed, switching to no-db mode:', (e as Error).message);
+    storageMode = "no-db";
+    db = null;
+    pool = null;
+    dbVerified = true;
+    return false;
+  }
+}
+
+export function getStorageMode(): StorageMode {
+  return storageMode;
+}
+
+export { dbInitError };
+
+console.log(`[db] Initial storage mode: ${storageMode} (verification pending)`);

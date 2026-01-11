@@ -1,12 +1,11 @@
-import { pool, dbInitError, storageMode } from "./db";
+import { pool, dbInitError, getStorageMode, db } from "./db";
 import { eq, and, sql, desc, ilike, max, inArray } from "drizzle-orm";
-import { db } from "./db";
 import * as schema from "@shared/schema";
 
-export { storageMode };
+export { getStorageMode as storageMode };
 
 function isDbAvailable(): boolean {
-  return db !== null && storageMode === "postgres";
+  return db !== null && getStorageMode() === "postgres";
 }
 
 function getDb() {
