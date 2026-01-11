@@ -15,14 +15,48 @@ const syncLocks = new Map<string, boolean>();
 const lastSyncStart = new Map<string, number>();
 const MIN_SYNC_INTERVAL = 10 * 60 * 1000; // 10 minutes
 
-// Helper function for API calls
-async function jget(url: string) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    if (res.status === 404) return null;
-    throw new Error(`${res.status} ${res.statusText} for ${url}`);
+// Timeout and retry configuration
+const FETCH_TIMEOUT_MS = 15000; // 15 seconds
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [500, 1500, 3000]; // exponential backoff
+
+// Helper function for API calls with timeout and retry
+async function jget(url: string, retries = MAX_RETRIES): Promise<any> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error(`${res.status} ${res.statusText} for ${url}`);
+      }
+      return res.json();
+    } catch (err) {
+      clearTimeout(timeoutId);
+      lastError = err as Error;
+      
+      // Don't retry on abort (timeout) or 4xx errors
+      if ((err as Error).name === 'AbortError') {
+        console.warn(`[jget] Timeout after ${FETCH_TIMEOUT_MS}ms for ${url}`);
+        throw new Error(`Request timeout for ${url}`);
+      }
+      
+      // Retry on network errors
+      if (attempt < retries - 1) {
+        const delay = RETRY_DELAYS[attempt] || 3000;
+        console.warn(`[jget] Retry ${attempt + 1}/${retries} after ${delay}ms for ${url}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
-  return res.json();
+  
+  throw lastError || new Error(`Failed to fetch ${url} after ${retries} attempts`);
 }
 
 async function getUserByUsername(username: string) {

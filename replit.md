@@ -79,6 +79,29 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 11, 2026 (Production Reliability + UX Improvements)
+**Production Reliability**:
+- Fixed 500 errors caused by DATABASE_URL pointing to internal "helium" hostname in deployment
+- Added no-db fallback mode: fetches data directly from Sleeper API when database unavailable
+- Added `/api/health` endpoint reporting storage mode, DB connectivity, and environment info
+- Added retry logic with exponential backoff (3 retries, 500ms/1500ms/3000ms delays) for Sleeper API calls
+- Added 15-second timeout for external API calls via AbortController
+- Responses include `degraded: true` flag when operating in fallback mode
+
+**Frontend Crash Fixes**:
+- Fixed `.toFixed()` crashes with null-safe formatting helpers (fmtNum, fmtPct)
+- Updated TeamsSection, TradeTargetsModal, and LeagueGroupDetails with defensive rendering
+
+**Trade Targets UX**:
+- Modal now shows ALL opponents by default (no need to click "Show all")
+- Better error toasts when individual sync fails with actionable message
+- Toggle button correctly shows "Show fewer" when expanded
+
+**Documentation**:
+- Added /docs/PROD_BUG_ROOT_CAUSE.md explaining the "helium" hostname issue
+- Added /docs/PROD_FIX_CHECKLIST.md with verification steps
+- Added /GOTCHAS.md with developer documentation
+
 ### January 6, 2026 (Phase 2.4 Major UX Overhaul)
 **Placement Accuracy**:
 - Derivation ladder: 1) roster.settings fields (final_rank, playoff_rank) 2) bracket endpoints 3) NULL (never guess)

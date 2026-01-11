@@ -1,0 +1,72 @@
+You are the Replit Agent working inside my existing project “Sleeper Scout”.
+Your #1 priority is PRODUCTION RELIABILITY: the deployed (published) site must work for external users, not just Preview.
+
+NON-NEGOTIABLE RULES
+- Do NOT claim “fixed” unless you verify on the PUBLIC deployed URL (not Preview).
+- Implement changes in source (TypeScript) files, not dist output.
+- Keep changes minimal and surgical. No rewrites.
+- Add defensive UI guards so missing data never crashes rendering (no .toFixed on undefined).
+
+CURRENT BUG (PRODUCTION)
+- External users hit 500s on:
+  - GET /api/overview?username=...
+  - GET /api/players/exposure?...
+- Deployment logs show: getaddrinfo EAI_AGAIN helium
+This means server is trying to connect to hostname “helium” in deployment and DNS fails.
+
+TASK 1 — FIND THE ROOT CAUSE IN CODE
+- Use code search for: "helium", "DATABASE_URL", "getaddrinfo", "pg", "postgres", connection string builders.
+- Identify exactly how hostname "helium" is being introduced (likely server/db.ts).
+- Document the finding in a short note in /docs/PROD_BUG_ROOT_CAUSE.md.
+
+TASK 2 — FIX SO DEPLOYED APP DOES NOT 500
+Implement ONE of these approaches (prefer A unless impossible):
+
+A) Make DB optional in deployment (recommended)
+- If DATABASE_URL is missing OR hostname resolves to "helium" OR DNS fails (EAI_AGAIN),
+  then DO NOT crash the request handler.
+- Instead:
+  - fall back to an in-memory cache (and/or SQLite if already present)
+  - still fetch Sleeper API data directly with rate limiting
+- Return 200 with live data whenever possible.
+- If truly blocked, return 503 with a clear JSON error message explaining config needed.
+
+B) Proper production DB usage
+- Ensure server uses process.env.DATABASE_URL in deployment and never rewrites it to “helium”.
+- If DATABASE_URL hostname === “helium” in deployment, log a clear error and fail gracefully (no crash).
+- Add a /api/health route that reports:
+  - running environment (dev vs deployment)
+  - whether DB is connected (true/false)
+  - which storage adapter is active (postgres/sqlite/memory)
+  - DO NOT leak secrets.
+
+TASK 3 — ADD RETRIES + TIMEOUTS (STOP “LOADS FOREVER”)
+- Wrap external fetches (Sleeper API + DB) with:
+  - timeout (AbortController)
+  - retry with exponential backoff for transient network errors
+- Ensure the frontend shows a real error state quickly and never spins forever.
+
+TASK 4 — FIX FRONTEND CRASHES
+There is a known crash:
+- Cannot read properties of undefined (reading 'toFixed') in LeagueGroupDetails.tsx (all_play_pct).
+Fix by making rendering safe:
+- Use optional chaining / fallback formatting (e.g., show “—” when missing)
+
+TASK 5 — VERIFY ON THE PUBLIC DEPLOYMENT (REQUIRED)
+- From within the Replit shell, run curl against the PUBLISHED URL endpoints:
+  - /api/overview?username=henes35
+  - /api/players/exposure?username=henes35&sort=exposure_desc
+- Confirm HTTP 200 and valid JSON, not HTML.
+- If failures persist, print the exact server stack trace and the code path.
+
+DELIVERABLES
+- A concise checklist in /docs/PROD_FIX_CHECKLIST.md including:
+  - what was changed (files)
+  - how to verify on public deployment
+  - remaining known issues (if any)
+- After code changes, re-run build/test, and confirm no TS errors.
+
+GOTCHAS TO WATCH
+- Deployment env vars may differ from dev. Do not assume DATABASE_URL/secrets exist in deployment.
+- Replit dev hostnames like “helium” may work in Preview but fail in Deployment.
+- Never block rendering on optional analytics fields; missing data must not crash the UI.
