@@ -1,0 +1,70 @@
+You are my product-minded senior full-stack engineer for Sleeper Scout. Production is stable now. Next: implement UX improvements and missing “truth data” using real Sleeper endpoints. Do NOT rebuild the app; refactor the current UI layout for flow + reduce clicks.
+
+HIGH-LEVEL PRODUCT GOAL
+When I open a league, I should immediately see:
+1) How I finished (most recent season default) + prior seasons dropdown
+2) Trade Targets (pre-populated, usable, minimal clicking)
+3) Team rosters + draft capital + trade history
+Everything should be accurate (no “guesses” for champion/runner-up).
+
+DATA TRUTH REQUIREMENTS (NO GUESSING)
+- Season finish / champion / runner-up must be derived from Sleeper bracket endpoints, NOT regular-season rank.
+- Use real endpoints per season leagueId:
+  - /league/{league_id}/winners_bracket
+  - /league/{league_id}/losers_bracket  (if needed)
+  - Use playoff bracket structure to determine final placements.
+- If a league/season has no playoffs/bracket data, label as “No playoff data” and do not guess.
+
+FEATURE REQUIREMENTS
+1) Season Finish: year-by-year placement
+- On each league TILE (before click), show the most recent season result prominently:
+  e.g., “2025: Runner-up (#2)” or “2025: Champion”
+- Inside league details, add “Season History” section with dropdown:
+  - Default: most recent season
+  - Shows: record, PF, regular season rank, final finish (from bracket), result label
+- Fix incorrect “Champion” labels.
+
+2) Trade Targets modal behavior
+- Clicking “Targets” should show ALL opponents in that league by default (not just top few).
+- Provide search + sort. Keep “Show all (N)” working reliably.
+- “Needs sync” should be actionable:
+  - Clicking sync must actually queue/run sync for that opponent and then refresh the row.
+  - If sync fails, show an error toast with reason.
+- Targets scoring definition stays the same: opponents ranked by how much they want players on MY roster based on their cross-league exposure.
+
+3) Draft Capital clarity
+- Make it explicit what “Draft Capital” means:
+  - Current year + future years picks owned, including traded picks.
+- Add a scope toggle:
+  - “Current year only” vs “All future years”
+- Ensure it is not “all time” ambiguous. Label the year range being displayed.
+
+4) Page flow / reordering (reduce click depth)
+Current league details page feels like features were appended in build order. Reorder into a coherent “trade-first” flow:
+- TOP: Season Finish summary (most recent) + dropdown for other seasons
+- NEXT: Trade Targets (since that’s the core value)
+- NEXT: Trade History (with year filter)
+- NEXT: Rosters + Draft Capital (expandable per team)
+- NEXT: Scouting metrics (move to Scouting tab; currently that tab is underused)
+- Keep H2H and other deep analytics lower on the page or behind tabs.
+
+5) Safety / gotchas section (developer-facing, in code comments or a README)
+Add a “GOTCHAS” section explaining:
+- Offseason empty states and missing bracket data
+- previous_league_id chains and season mapping
+- Rate limiting / concurrency caps for Sleeper calls
+- Why regular-season rank cannot determine champion
+- How “draft capital” is computed from picks + traded picks
+
+IMPLEMENTATION GUIDELINES
+- Use existing caching; don’t re-fetch everything on every render.
+- Add concurrency limits for bracket fetch across many leagues.
+- UI should not block forever: loading states must time out to error states with Retry.
+
+DELIVERABLES
+- Updated UI ordering
+- Accurate season finish on tiles + in league details
+- Targets modal shows everyone + working sync
+- Draft capital scope clarity
+- GOTCHAS section documented
+- Provide: files changed, what changed, verification steps
