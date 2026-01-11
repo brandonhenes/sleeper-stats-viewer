@@ -17,7 +17,11 @@ function parseHostFromUrl(url: string): string {
 }
 
 function getDatabaseUrl(): string | null {
-  const isDeployment = process.env.REPLIT_DEPLOYMENT === "1";
+  // Multiple ways to detect deployment mode
+  const isDeployment = process.env.REPLIT_DEPLOYMENT === "1" 
+    || process.env.NODE_ENV === "production";
+  
+  console.log(`[db] Deployment detection: REPLIT_DEPLOYMENT=${process.env.REPLIT_DEPLOYMENT}, NODE_ENV=${process.env.NODE_ENV}, isDeployment=${isDeployment}`);
   
   // In deployment, check for production database file first
   if (isDeployment && existsSync("/tmp/replitdb")) {
@@ -38,11 +42,18 @@ function getDatabaseUrl(): string | null {
   
   const host = parseHostFromUrl(process.env.DATABASE_URL);
   
-  // In deployment, reject internal hostnames that won't be accessible
-  if (isDeployment && (host === "helium" || host.includes("localhost") || host === "127.0.0.1")) {
-    console.error(`[db] CRITICAL: DATABASE_URL points to internal hostname '${host}' which is not accessible in deployments.`);
-    console.error("[db] Running in no-db fallback mode - using direct Sleeper API calls.");
-    return null;
+  // ALWAYS reject internal hostnames - they never work in published apps
+  // "helium" is Replit's internal DB proxy hostname
+  if (host === "helium" || host.includes("localhost") || host === "127.0.0.1") {
+    if (isDeployment) {
+      console.error(`[db] CRITICAL: DATABASE_URL points to internal hostname '${host}' which is not accessible in deployments.`);
+      console.error("[db] Running in no-db fallback mode - using direct Sleeper API calls.");
+      return null;
+    } else {
+      // In development, internal hostnames are fine
+      console.log(`[db] Development mode: Using internal hostname '${host}'`);
+      return process.env.DATABASE_URL;
+    }
   }
   
   console.log(`[db] Using DATABASE_URL environment variable (host: ${host}, deployment: ${isDeployment})`);
