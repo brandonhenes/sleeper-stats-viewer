@@ -5,6 +5,7 @@ import { z } from "zod";
 import { cache, type SyncJob } from "./cache";
 import type { LeagueGroup } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { getStorageMode } from "./db";
 
 const BASE = "https://api.sleeper.app/v1";
 
@@ -963,6 +964,14 @@ export async function registerRoutes(
   // POST /api/sync - Starts a background sync job (non-blocking)
   app.post(api.sleeper.sync.path, async (req, res) => {
     try {
+      // Sync requires database - return graceful error in no-db mode
+      if (getStorageMode() !== "postgres") {
+        return res.status(503).json({
+          message: "Sync is temporarily unavailable. The app is running in fallback mode - you can still browse leagues but sync features are disabled.",
+          degraded: true,
+        });
+      }
+
       const { username } = api.sleeper.sync.input.parse(req.query);
       const usernameLower = username.toLowerCase();
 
