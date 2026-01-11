@@ -1,0 +1,51 @@
+You are the debugging + reliability engineer for this Replit app.
+
+Goal: Fix published deployment 500 errors and infinite loading. Preview works, but Published fails.
+
+Observed error (deployment logs):
+- GET /api/overview 500 :: {"message":"getaddrinfo EAI_AGAIN helium"}
+- GET /api/players/exposure 500 :: {"message":"getaddrinfo EAI_AGAIN helium"}
+This means the backend is trying to resolve/connect to hostname "helium" and DNS lookup fails in deployment.
+
+Your tasks (do in this order):
+
+1) Locate the source of hostname "helium"
+   - Run: grep -R "helium" -n .
+   - If found in code/config: replace it with correct host or remove the hardcode.
+   - If NOT found in code: it is coming from an environment variable (DATABASE_URL, REDIS_URL, CACHE_HOST, SLEEPER_BASE_URL, etc.).
+
+2) Add runtime diagnostics (safe logging, no secrets)
+   - On server startup, log the hostname portions ONLY:
+     - If DATABASE_URL exists, parse it and log: dbHost, dbPort
+     - If REDIS_URL exists, parse it and log: redisHost, redisPort
+     - If there is a Sleeper base URL variable, log it.
+   - Do NOT log full URLs with credentials.
+
+3) Confirm which dependency uses "helium"
+   - Identify which function throws the error (getUserByUsername path shows it).
+   - Determine whether the failing network call is to a DB/Redis/cache service or an HTTP fetch.
+   - Add contextual logs inside getUserByUsername to show what it tries first (cache/db vs Sleeper request).
+
+4) Fix deployment compatibility
+   - Ensure server binds to process.env.PORT and 0.0.0.0 if needed.
+   - Remove any reliance on an internal hostname that only exists in preview.
+   - If caching uses Redis and is optional, implement a safe fallback:
+     - If Redis/DB connection fails, continue without cache (in-memory cache ok) rather than crashing.
+   - If DATABASE_URL/REDIS_URL are required, fail fast with a clear 503 and a JSON error explaining missing/misconfigured env vars.
+
+5) Improve API error handling (stop infinite loading)
+   - In each route handler, catch errors and return JSON:
+     { error: { code, message, hint } }
+   - Use status 503 for dependency/network failures; 400 for bad input; 500 only for unexpected bugs.
+   - Ensure the client stops retrying on 4xx and shows the error message.
+
+6) Verification
+   - Reproduce locally (preview) and ensure no regression.
+   - Validate on Published deployment: /api/overview?username=henes35 returns 200.
+   - Validate /api/players/exposure works on Published.
+   - Confirm in browser DevTools Network that requests no longer return 500.
+
+Output requirements:
+- Explain what was using hostname "helium" and why it worked in preview but not in deployment.
+- List the exact files changed and what changed.
+- Include a short “How to set deployment env vars” note if that was the root cause.

@@ -571,6 +571,7 @@ export async function registerRoutes(
 
   // Health check endpoint - tests database connectivity
   app.get("/api/health", async (req, res) => {
+    const isDeployment = process.env.REPLIT_DEPLOYMENT === "1";
     try {
       const start = Date.now();
       await cache.testConnection();
@@ -581,13 +582,18 @@ export async function registerRoutes(
         timestamp: new Date().toISOString(),
         db_latency_ms: dbLatency,
         env: process.env.NODE_ENV || "unknown",
+        is_deployment: isDeployment,
       });
     } catch (e) {
       console.error("Health check failed:", e);
-      res.status(500).json({ 
+      res.status(503).json({ 
         status: "error", 
         error: e instanceof Error ? e.message : "Database connection failed",
         timestamp: new Date().toISOString(),
+        is_deployment: isDeployment,
+        hint: isDeployment 
+          ? "Production database may not be provisioned or accessible. Check deployment database settings."
+          : "Database connection failed in development mode.",
       });
     }
   });

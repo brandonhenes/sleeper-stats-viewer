@@ -1,7 +1,15 @@
-import { pool } from "./db";
+import { pool, dbInitError } from "./db";
 import { eq, and, sql, desc, ilike, max, inArray } from "drizzle-orm";
 import { db } from "./db";
 import * as schema from "@shared/schema";
+
+function getDb() {
+  if (!db) {
+    const errorMsg = dbInitError?.message || "Database not initialized";
+    throw new Error(`Database unavailable: ${errorMsg}`);
+  }
+  return db;
+}
 
 export interface CachedUser {
   user_id: string;
@@ -124,7 +132,7 @@ export const TTL = {
 export const cache = {
   async upsertUser(user: { user_id: string; username: string; display_name: string; avatar?: string | null }): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.users)
+    await getDb().insert(schema.users)
       .values({
         user_id: user.user_id,
         username: user.username,
@@ -144,12 +152,12 @@ export const cache = {
   },
 
   async getUserByUsername(username: string): Promise<CachedUser | undefined> {
-    const result = await db.select().from(schema.users).where(ilike(schema.users.username, username)).limit(1);
+    const result = await getDb().select().from(schema.users).where(ilike(schema.users.username, username)).limit(1);
     return result[0] as CachedUser | undefined;
   },
 
   async getUserById(userId: string): Promise<CachedUser | undefined> {
-    const result = await db.select().from(schema.users).where(eq(schema.users.user_id, userId)).limit(1);
+    const result = await getDb().select().from(schema.users).where(eq(schema.users.user_id, userId)).limit(1);
     return result[0] as CachedUser | undefined;
   },
 
@@ -167,7 +175,7 @@ export const cache = {
     const now = Date.now();
     const season = typeof league.season === "string" ? parseInt(league.season, 10) : league.season;
     
-    await db.insert(schema.leagues)
+    await getDb().insert(schema.leagues)
       .values({
         league_id: league.league_id,
         name: league.name,
@@ -195,7 +203,7 @@ export const cache = {
         },
       });
 
-    await db.insert(schema.user_leagues)
+    await getDb().insert(schema.user_leagues)
       .values({
         user_id: userId,
         league_id: league.league_id,
@@ -208,7 +216,7 @@ export const cache = {
   },
 
   async getLeaguesForUser(userId: string): Promise<CachedLeague[]> {
-    const result = await db
+    const result = await getDb()
       .select({
         league_id: schema.leagues.league_id,
         name: schema.leagues.name,
@@ -229,12 +237,12 @@ export const cache = {
   },
 
   async getLeagueById(leagueId: string): Promise<CachedLeague | undefined> {
-    const result = await db.select().from(schema.leagues).where(eq(schema.leagues.league_id, leagueId)).limit(1);
+    const result = await getDb().select().from(schema.leagues).where(eq(schema.leagues.league_id, leagueId)).limit(1);
     return result[0] as CachedLeague | undefined;
   },
 
   async getAllLeaguesMap(): Promise<{ league_id: string; previous_league_id: string | null }[]> {
-    const result = await db.select({
+    const result = await getDb().select({
       league_id: schema.leagues.league_id,
       previous_league_id: schema.leagues.previous_league_id,
     }).from(schema.leagues);
@@ -242,11 +250,11 @@ export const cache = {
   },
 
   async updateLeagueGroupId(leagueId: string, groupId: string): Promise<void> {
-    await db.update(schema.leagues).set({ group_id: groupId }).where(eq(schema.leagues.league_id, leagueId));
+    await getDb().update(schema.leagues).set({ group_id: groupId }).where(eq(schema.leagues.league_id, leagueId));
   },
 
   async getLeaguesByGroupId(groupId: string, ownerId: string): Promise<(CachedLeague & { wins: number; losses: number; ties: number })[]> {
-    const result = await db
+    const result = await getDb()
       .select({
         league_id: schema.leagues.league_id,
         name: schema.leagues.name,
@@ -283,7 +291,7 @@ export const cache = {
     fpts_against?: number;
   }): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.rosters)
+    await getDb().insert(schema.rosters)
       .values({
         league_id: roster.league_id,
         owner_id: roster.owner_id,
@@ -310,14 +318,14 @@ export const cache = {
   },
 
   async getRosterForUserInLeague(leagueId: string, ownerId: string): Promise<CachedRoster | undefined> {
-    const result = await db.select().from(schema.rosters)
+    const result = await getDb().select().from(schema.rosters)
       .where(and(eq(schema.rosters.league_id, leagueId), eq(schema.rosters.owner_id, ownerId)))
       .limit(1);
     return result[0] as CachedRoster | undefined;
   },
 
   async getRostersForUser(userId: string): Promise<CachedRoster[]> {
-    const result = await db
+    const result = await getDb()
       .select({
         league_id: schema.rosters.league_id,
         owner_id: schema.rosters.owner_id,
@@ -336,14 +344,14 @@ export const cache = {
   },
 
   async getRostersForLeague(leagueId: string): Promise<CachedRoster[]> {
-    const result = await db.select().from(schema.rosters)
+    const result = await getDb().select().from(schema.rosters)
       .where(eq(schema.rosters.league_id, leagueId));
     return result as CachedRoster[];
   },
 
   async updateRosterPlayers(leagueId: string, ownerId: string, playerIds: string[]): Promise<void> {
     const now = Date.now();
-    await db.delete(schema.roster_players)
+    await getDb().delete(schema.roster_players)
       .where(and(eq(schema.roster_players.league_id, leagueId), eq(schema.roster_players.owner_id, ownerId)));
     
     if (playerIds.length > 0) {
@@ -353,12 +361,12 @@ export const cache = {
         player_id: playerId,
         updated_at: now,
       }));
-      await db.insert(schema.roster_players).values(values);
+      await getDb().insert(schema.roster_players).values(values);
     }
   },
 
   async getLastSyncTime(userId: string): Promise<number | null> {
-    const result = await db.select({ last_sync: max(schema.user_leagues.updated_at) })
+    const result = await getDb().select({ last_sync: max(schema.user_leagues.updated_at) })
       .from(schema.user_leagues)
       .where(eq(schema.user_leagues.user_id, userId));
     return result[0]?.last_sync || null;
@@ -371,7 +379,7 @@ export const cache = {
   },
 
   async upsertSyncJob(job: SyncJob): Promise<void> {
-    await db.insert(schema.sync_jobs)
+    await getDb().insert(schema.sync_jobs)
       .values({
         job_id: job.job_id,
         username: job.username,
@@ -399,12 +407,12 @@ export const cache = {
   },
 
   async getSyncJob(jobId: string): Promise<SyncJob | undefined> {
-    const result = await db.select().from(schema.sync_jobs).where(eq(schema.sync_jobs.job_id, jobId)).limit(1);
+    const result = await getDb().select().from(schema.sync_jobs).where(eq(schema.sync_jobs.job_id, jobId)).limit(1);
     return result[0] as SyncJob | undefined;
   },
 
   async getLatestSyncJobForUser(username: string): Promise<SyncJob | undefined> {
-    const result = await db.select().from(schema.sync_jobs)
+    const result = await getDb().select().from(schema.sync_jobs)
       .where(ilike(schema.sync_jobs.username, username))
       .orderBy(desc(schema.sync_jobs.started_at))
       .limit(1);
@@ -412,7 +420,7 @@ export const cache = {
   },
 
   async getRunningJobForUser(username: string): Promise<SyncJob | undefined> {
-    const result = await db.select().from(schema.sync_jobs)
+    const result = await getDb().select().from(schema.sync_jobs)
       .where(and(ilike(schema.sync_jobs.username, username), eq(schema.sync_jobs.status, "running")))
       .limit(1);
     return result[0] as SyncJob | undefined;
@@ -420,7 +428,7 @@ export const cache = {
 
   async upsertLeagueUser(leagueUser: { league_id: string; user_id: string; display_name?: string | null; team_name?: string | null }): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.league_users)
+    await getDb().insert(schema.league_users)
       .values({
         league_id: leagueUser.league_id,
         user_id: leagueUser.user_id,
@@ -439,13 +447,13 @@ export const cache = {
   },
 
   async getLeagueUsers(leagueId: string): Promise<LeagueUser[]> {
-    const result = await db.select().from(schema.league_users).where(eq(schema.league_users.league_id, leagueId));
+    const result = await getDb().select().from(schema.league_users).where(eq(schema.league_users.league_id, leagueId));
     return result as LeagueUser[];
   },
 
   async upsertH2hSeason(record: Omit<H2hRecord, "updated_at">): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.h2h_season)
+    await getDb().insert(schema.h2h_season)
       .values({ ...record, updated_at: now })
       .onConflictDoUpdate({
         target: [schema.h2h_season.league_id, schema.h2h_season.my_owner_id, schema.h2h_season.opp_owner_id],
@@ -462,13 +470,13 @@ export const cache = {
   },
 
   async getH2hForLeague(leagueId: string, myOwnerId: string): Promise<H2hRecord[]> {
-    const result = await db.select().from(schema.h2h_season)
+    const result = await getDb().select().from(schema.h2h_season)
       .where(and(eq(schema.h2h_season.league_id, leagueId), eq(schema.h2h_season.my_owner_id, myOwnerId)));
     return result as H2hRecord[];
   },
 
   async getGroupOverride(leagueId: string): Promise<string | undefined> {
-    const result = await db.select().from(schema.group_overrides).where(eq(schema.group_overrides.league_id, leagueId)).limit(1);
+    const result = await getDb().select().from(schema.group_overrides).where(eq(schema.group_overrides.league_id, leagueId)).limit(1);
     return result[0]?.forced_group_id;
   },
 
@@ -484,7 +492,7 @@ export const cache = {
     waiver_budget?: string | null;
   }): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.trades)
+    await getDb().insert(schema.trades)
       .values({
         transaction_id: trade.transaction_id,
         league_id: trade.league_id,
@@ -512,7 +520,7 @@ export const cache = {
   },
 
   async getTradesForLeague(leagueId: string): Promise<CachedTrade[]> {
-    const result = await db.select().from(schema.trades)
+    const result = await getDb().select().from(schema.trades)
       .where(eq(schema.trades.league_id, leagueId))
       .orderBy(desc(schema.trades.created_at));
     return result as CachedTrade[];
@@ -530,7 +538,7 @@ export const cache = {
     years_exp?: number | null;
   }): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.players_master)
+    await getDb().insert(schema.players_master)
       .values({
         player_id: player.player_id,
         full_name: player.full_name || null,
@@ -560,22 +568,22 @@ export const cache = {
   },
 
   async getPlayer(playerId: string): Promise<CachedPlayer | undefined> {
-    const result = await db.select().from(schema.players_master).where(eq(schema.players_master.player_id, playerId)).limit(1);
+    const result = await getDb().select().from(schema.players_master).where(eq(schema.players_master.player_id, playerId)).limit(1);
     return result[0] as CachedPlayer | undefined;
   },
 
   async getAllPlayers(): Promise<CachedPlayer[]> {
-    const result = await db.select().from(schema.players_master);
+    const result = await getDb().select().from(schema.players_master);
     return result as CachedPlayer[];
   },
 
   async getPlayersLastUpdated(): Promise<number | null> {
-    const result = await db.select({ last_updated: max(schema.players_master.updated_at) }).from(schema.players_master);
+    const result = await getDb().select({ last_updated: max(schema.players_master.updated_at) }).from(schema.players_master);
     return result[0]?.last_updated || null;
   },
 
   async getPlayerCount(): Promise<number> {
-    const result = await db.select({ count: sql<number>`count(*)` }).from(schema.players_master);
+    const result = await getDb().select({ count: sql<number>`count(*)` }).from(schema.players_master);
     return Number(result[0]?.count) || 0;
   },
 
@@ -608,7 +616,7 @@ export const cache = {
         updated_at: now,
       }));
       
-      await db.insert(schema.players_master)
+      await getDb().insert(schema.players_master)
         .values(values)
         .onConflictDoUpdate({
           target: schema.players_master.player_id,
@@ -628,14 +636,14 @@ export const cache = {
   },
 
   async getRosterPlayersForUserInLeague(leagueId: string, ownerId: string): Promise<{ player_id: string }[]> {
-    const result = await db.select({ player_id: schema.roster_players.player_id })
+    const result = await getDb().select({ player_id: schema.roster_players.player_id })
       .from(schema.roster_players)
       .where(and(eq(schema.roster_players.league_id, leagueId), eq(schema.roster_players.owner_id, ownerId)));
     return result;
   },
 
   async getAllRosterPlayersForLeague(leagueId: string): Promise<{ owner_id: string; player_id: string }[]> {
-    const result = await db.select({ 
+    const result = await getDb().select({ 
       owner_id: schema.roster_players.owner_id,
       player_id: schema.roster_players.player_id 
     })
@@ -645,7 +653,7 @@ export const cache = {
   },
 
   async getAllRosterPlayersWithRosterId(leagueId: string): Promise<{ roster_id: number; owner_id: string; player_id: string }[]> {
-    const result = await db.select({ 
+    const result = await getDb().select({ 
       roster_id: schema.rosters.roster_id,
       owner_id: schema.roster_players.owner_id,
       player_id: schema.roster_players.player_id 
@@ -664,7 +672,7 @@ export const cache = {
 
   async getPlayersByIds(playerIds: string[]): Promise<CachedPlayer[]> {
     if (playerIds.length === 0) return [];
-    const result = await db.select().from(schema.players_master)
+    const result = await getDb().select().from(schema.players_master)
       .where(inArray(schema.players_master.player_id, playerIds));
     return result as CachedPlayer[];
   },
@@ -686,7 +694,7 @@ export const cache = {
     const now = Date.now();
     
     for (const asset of assets) {
-      await db.insert(schema.trade_assets)
+      await getDb().insert(schema.trade_assets)
         .values({
           trade_id: asset.trade_id,
           league_id: asset.league_id,
@@ -712,14 +720,14 @@ export const cache = {
   },
 
   async getTradeAssetsForLeague(leagueId: string): Promise<TradeAsset[]> {
-    const result = await db.select().from(schema.trade_assets)
+    const result = await getDb().select().from(schema.trade_assets)
       .where(eq(schema.trade_assets.league_id, leagueId))
       .orderBy(desc(schema.trade_assets.created_at_ms));
     return result as TradeAsset[];
   },
 
   async getTradeAssetsForRoster(leagueId: string, rosterId: number): Promise<TradeAsset[]> {
-    const result = await db.select().from(schema.trade_assets)
+    const result = await getDb().select().from(schema.trade_assets)
       .where(and(
         eq(schema.trade_assets.league_id, leagueId),
         eq(schema.trade_assets.roster_id, rosterId)
@@ -729,7 +737,7 @@ export const cache = {
   },
 
   async getAllTradeAssets(): Promise<TradeAsset[]> {
-    const result = await db.select().from(schema.trade_assets)
+    const result = await getDb().select().from(schema.trade_assets)
       .orderBy(desc(schema.trade_assets.created_at_ms));
     return result as TradeAsset[];
   },
@@ -748,10 +756,10 @@ export const cache = {
     
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     
-    const total = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets).where(whereClause);
-    const players = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
+    const total = await getDb().select({ count: sql<number>`count(*)` }).from(schema.trade_assets).where(whereClause);
+    const players = await getDb().select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
       .where(whereClause ? and(whereClause, eq(schema.trade_assets.asset_type, 'player')) : eq(schema.trade_assets.asset_type, 'player'));
-    const picks = await db.select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
+    const picks = await getDb().select({ count: sql<number>`count(*)` }).from(schema.trade_assets)
       .where(whereClause ? and(whereClause, eq(schema.trade_assets.asset_type, 'pick')) : eq(schema.trade_assets.asset_type, 'pick'));
     return {
       total: Number(total[0]?.count) || 0,
@@ -776,7 +784,7 @@ export const cache = {
       conditions.push(eq(schema.trade_assets.season, opts.season));
     }
     
-    const result = await db.select({
+    const result = await getDb().select({
       player_id: schema.trade_assets.asset_key,
       player_name: schema.trade_assets.asset_name,
       trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
@@ -809,7 +817,7 @@ export const cache = {
       conditions.push(eq(schema.trade_assets.season, opts.season));
     }
     
-    const result = await db.select({
+    const result = await getDb().select({
       pick_type: schema.trade_assets.asset_key,
       trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
     })
@@ -839,7 +847,7 @@ export const cache = {
     
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     
-    const result = await db.select({
+    const result = await getDb().select({
       season: schema.trade_assets.season,
       trade_count: sql<number>`count(distinct ${schema.trade_assets.trade_id})`,
       player_count: sql<number>`count(case when ${schema.trade_assets.asset_type} = 'player' then 1 end)`,
@@ -887,14 +895,14 @@ export const cache = {
       conditions.push(eq(schema.trade_assets.season, opts.season));
     }
     
-    const result = await db.select().from(schema.trade_assets)
+    const result = await getDb().select().from(schema.trade_assets)
       .where(and(...conditions))
       .orderBy(desc(schema.trade_assets.created_at_ms));
     return result as TradeAsset[];
   },
 
   async getLeagueIdsForGroup(groupId: string): Promise<{ league_id: string; season: number }[]> {
-    const result = await db.select({
+    const result = await getDb().select({
       league_id: schema.leagues.league_id,
       season: schema.leagues.season,
     })
@@ -905,7 +913,7 @@ export const cache = {
   },
 
   async clearTradeAssetsForLeague(leagueId: string): Promise<void> {
-    await db.delete(schema.trade_assets).where(eq(schema.trade_assets.league_id, leagueId));
+    await getDb().delete(schema.trade_assets).where(eq(schema.trade_assets.league_id, leagueId));
   },
 
   async resolveLatestLeagueId(leagueIdOrGroupId: string): Promise<string | null> {
@@ -923,14 +931,14 @@ export const cache = {
   },
 
   async getRostersLastUpdated(leagueId: string): Promise<number | null> {
-    const result = await db.select({ updated_at: max(schema.rosters.updated_at) })
+    const result = await getDb().select({ updated_at: max(schema.rosters.updated_at) })
       .from(schema.rosters)
       .where(eq(schema.rosters.league_id, leagueId));
     return result[0]?.updated_at ?? null;
   },
 
   async getTradesLastUpdated(leagueId: string): Promise<number | null> {
-    const result = await db.select({ updated_at: max(schema.trades.updated_at) })
+    const result = await getDb().select({ updated_at: max(schema.trades.updated_at) })
       .from(schema.trades)
       .where(eq(schema.trades.league_id, leagueId));
     return result[0]?.updated_at ?? null;
@@ -971,7 +979,7 @@ export const cache = {
     exposure_json: Record<string, { count: number; pct: number; pos: string | null }>;
     last_synced_at: number;
   } | null> {
-    const result = await db.select()
+    const result = await getDb().select()
       .from(schema.user_exposure_summary)
       .where(ilike(schema.user_exposure_summary.username, username))
       .limit(1);
@@ -992,7 +1000,7 @@ export const cache = {
     exposure_json: Record<string, { count: number; pct: number; pos: string | null }>;
   }): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.user_exposure_summary)
+    await getDb().insert(schema.user_exposure_summary)
       .values({
         username: data.username.toLowerCase(),
         season: data.season,
@@ -1033,7 +1041,7 @@ export const cache = {
     pa: number | null;
   }>> {
     if (leagueIds.length === 0) return [];
-    const result = await db.select()
+    const result = await getDb().select()
       .from(schema.league_season_summary)
       .where(and(
         inArray(schema.league_season_summary.league_id, leagueIds),
@@ -1072,7 +1080,7 @@ export const cache = {
     pa?: number | null;
   }): Promise<void> {
     const now = Date.now();
-    await db.insert(schema.league_season_summary)
+    await getDb().insert(schema.league_season_summary)
       .values({
         league_id: data.league_id,
         user_id: data.user_id,
@@ -1109,7 +1117,7 @@ export const cache = {
   },
 
   async testConnection(): Promise<void> {
-    await db.execute(sql`SELECT 1`);
+    await getDb().execute(sql`SELECT 1`);
   },
 };
 
