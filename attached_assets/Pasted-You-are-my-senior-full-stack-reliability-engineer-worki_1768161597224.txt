@@ -1,0 +1,70 @@
+You are my senior full-stack reliability engineer working inside an existing Replit app called “Sleeper Scout”. Goal: fix the PUBLISHED deployment errors and make the app resilient. Do NOT rewrite the whole app. Make the smallest changes that fix production. Work in tight loops: reproduce → patch → verify.
+
+CONTEXT / SYMPTOMS
+- Published site returns 500 on:
+  - GET /api/overview?username=...
+  - GET /api/players/exposure?... 
+- Browser console shows 500 errors for those endpoints.
+- Server logs show: getaddrinfo EAI_AGAIN helium
+  This means backend is attempting DNS lookup for host "helium" and failing in deployment.
+- Frontend sometimes crashes with: Cannot read properties of undefined (reading 'toFixed')
+
+PRIMARY OBJECTIVES (in order)
+1) Fix deployment so published app works for any username (no 500 from /api/overview or /api/players/exposure).
+2) Ensure DB/network failures do NOT crash the entire API route. Return a useful error + keep UI usable.
+3) Fix the frontend .toFixed crash with null-safe rendering so missing fields never crash the page.
+4) Add lightweight diagnostics so we can debug future prod issues quickly.
+
+NON-NEGOTIABLES
+- Do NOT introduce breaking changes to routes or response shapes unless absolutely necessary.
+- Do NOT spam the Sleeper API; respect rate limits. Prefer cached DB when available.
+- If DB is unavailable in deployment, the app must still function using direct Sleeper API (with rate limiting) OR a deployment-safe storage option.
+- Every change must include: what file(s) changed, why, and how verified.
+
+STEP-BY-STEP TASKS
+A) Reproduce + pinpoint helium usage
+- Search codebase for “helium” and identify why the backend tries to resolve it.
+- Identify the DB connection logic (likely server/db.ts) and which env var(s) it uses (DATABASE_URL, etc).
+- Confirm which path triggers DB access inside /api/overview and /api/players/exposure.
+
+B) Make DB config deployment-safe
+- In deployment, “helium” hostname must not be used.
+- Implement a robust connection strategy:
+  1) Prefer process.env.DATABASE_URL if it exists and is deployment-accessible.
+  2) If DATABASE_URL is missing or points to an internal host, gracefully degrade:
+     - Either: use SQLite (local file) for caching in deployment
+     - OR: skip DB and use in-memory cache + direct Sleeper API with rate limiting
+- Add a clear log line on startup indicating which storage mode is active: “postgres”, “sqlite”, or “no-db fallback”.
+
+C) Prevent 500 cascade
+- Wrap DB calls in try/catch.
+- If DB fails, do NOT throw unhandled. Return a 200 with data fetched from Sleeper directly (preferred), or return a 503 with a JSON body:
+  { message: "...", mode: "fallback", hint: "db unavailable" }
+- Ensure the client shows a friendly error state and a “Retry” button without freezing.
+
+D) Fix frontend crash (.toFixed)
+- Locate the component at client/src/pages/LeagueGroupDetails.tsx around where it does:
+  allPlayData.all_play_pct.toFixed(1)
+- Make it null-safe:
+  - Use optional chaining and fallback number, or conditional render:
+    const pct = allPlayData?.all_play_pct
+    render pct != null ? pct.toFixed(1) : "—"
+- Ensure no other .toFixed or numeric ops can run on undefined in key pages.
+
+E) Add minimal diagnostics (important)
+- Add a /api/health endpoint that returns:
+  { ok: true, storageMode: "...", hasDatabaseUrl: true/false }
+- Add server-side logging for failed external calls with:
+  endpoint name, username, and error code (no secrets)
+
+VERIFICATION (must do)
+- In Replit preview: load a username page; confirm overview + exposure returns successfully.
+- In “published-like” mode: ensure routes do not depend on internal hostname.
+- Confirm no 500s in the browser console for /api/overview and /api/players/exposure.
+- Confirm UI does not crash when data fields are missing.
+
+OUTPUT FORMAT
+1) Brief root cause (1 paragraph)
+2) List of files changed
+3) Exact changes summary (bullets)
+4) How you verified (steps + results)

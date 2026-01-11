@@ -57,6 +57,42 @@ async function getTradedPicks(leagueId: string) {
   return jget(`${BASE}/league/${leagueId}/traded_picks`);
 }
 
+// Fetch user's leagues directly from Sleeper API (for no-db fallback mode)
+// Returns simplified league groups structure
+async function fetchLeaguesFromSleeperDirect(userId: string, username: string): Promise<any[]> {
+  const currentSeason = getCurrentNFLSeason();
+  const seasons = [currentSeason, currentSeason - 1];
+  
+  const allLeagues: any[] = [];
+  for (const season of seasons) {
+    try {
+      const leagues = await getLeaguesForSeason(userId, "nfl", season);
+      if (leagues && Array.isArray(leagues)) {
+        allLeagues.push(...leagues);
+      }
+    } catch (e) {
+      console.warn(`[no-db] Failed to fetch leagues for season ${season}:`, e);
+    }
+  }
+
+  // Group by league_id (simple grouping without previous_league_id chains)
+  const leagueGroups = allLeagues.map((league: any) => ({
+    group_id: league.league_id,
+    name: league.name,
+    min_season: parseInt(league.season),
+    max_season: parseInt(league.season),
+    seasons_count: 1,
+    overall_record: { wins: 0, losses: 0, ties: 0 },
+    league_ids: [league.league_id],
+    league_type: league.settings?.type === 2 ? "dynasty" : "redraft",
+    is_active: league.status === "in_season" || league.status === "pre_draft" || league.status === "drafting",
+    latest_league_id: league.league_id,
+    trade_summary: null,
+  }));
+
+  return leagueGroups;
+}
+
 // Concurrency limiter
 async function withConcurrencyLimit<T>(
   items: T[],
@@ -574,23 +610,27 @@ export async function registerRoutes(
     const isDeployment = process.env.REPLIT_DEPLOYMENT === "1";
     try {
       const start = Date.now();
-      await cache.testConnection();
+      const connTest = await cache.testConnection();
       const dbLatency = Date.now() - start;
       
       res.json({ 
         status: "ok", 
         timestamp: new Date().toISOString(),
-        db_latency_ms: dbLatency,
+        storage_mode: connTest.mode,
+        db_latency_ms: connTest.mode === "postgres" ? dbLatency : null,
         env: process.env.NODE_ENV || "unknown",
         is_deployment: isDeployment,
+        has_database_url: !!process.env.DATABASE_URL,
       });
     } catch (e) {
       console.error("Health check failed:", e);
       res.status(503).json({ 
         status: "error", 
+        storage_mode: cache.isDbAvailable() ? "postgres" : "no-db",
         error: e instanceof Error ? e.message : "Database connection failed",
         timestamp: new Date().toISOString(),
         is_deployment: isDeployment,
+        has_database_url: !!process.env.DATABASE_URL,
         hint: isDeployment 
           ? "Production database may not be provisioned or accessible. Check deployment database settings."
           : "Database connection failed in development mode.",
@@ -748,9 +788,41 @@ export async function registerRoutes(
 
   // GET /api/overview - Returns league groups with aggregated W-L records
   // Always returns cached data immediately with sync status flags
+  // Falls back to direct Sleeper API if DB is unavailable
   app.get(api.sleeper.overview.path, async (req, res) => {
     try {
       const { username } = api.sleeper.overview.input.parse(req.query);
+      const dbAvailable = cache.isDbAvailable();
+
+      // If DB is not available, fetch data from Sleeper API directly
+      if (!dbAvailable) {
+        console.log(`[overview] No-DB mode: fetching user ${username} from Sleeper API directly`);
+        const user = await getUserByUsername(username);
+        if (!user) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        // Fetch leagues directly from Sleeper (limited to current + previous season)
+        const leagueGroups = await fetchLeaguesFromSleeperDirect(user.user_id, username);
+        console.log(`[overview] No-DB mode: fetched ${leagueGroups.length} leagues from Sleeper API`);
+
+        return res.json({
+          user: {
+            user_id: user.user_id,
+            username: user.username,
+            display_name: user.display_name,
+            avatar: user.avatar,
+          },
+          league_groups: leagueGroups,
+          cached: false,
+          needs_sync: true,
+          sync_status: "not_started",
+          lastSyncedAt: undefined,
+          storage_mode: "no-db",
+          degraded: true,
+          hint: "Database unavailable - showing basic league data from Sleeper. Some features like trade history and head-to-head records are disabled.",
+        });
+      }
 
       // Check cache first
       let cachedUser = await cache.getUserByUsername(username);
@@ -1295,12 +1367,29 @@ export async function registerRoutes(
 
   // GET /api/players/exposure - Get player exposure for a user
   // Counts only ACTIVE leagues (latest season per group_id where user has roster and league is active) with pagination
+  // Falls back to empty list if DB is unavailable
   app.get(api.sleeper.playerExposure.path, async (req, res) => {
     try {
       const { username, page: pageStr, pageSize: pageSizeStr, pos, search, sort } = req.query;
       
       if (!username || typeof username !== "string") {
         return res.status(400).json({ message: "Username required" });
+      }
+
+      // If DB is not available, return informative degraded response
+      if (!cache.isDbAvailable()) {
+        console.log(`[exposure] No-DB mode: exposure unavailable for ${username}`);
+        return res.json({
+          total: 0,
+          page: 1,
+          pageSize: 100,
+          exposures: [],
+          activeLeagueCount: 0,
+          historyLeagueCount: 0,
+          storage_mode: "no-db",
+          degraded: true,
+          hint: "Player exposure data requires synced roster data. Database is currently unavailable - this feature is temporarily disabled.",
+        });
       }
 
       const page = Math.max(1, parseInt(pageStr as string) || 1);

@@ -1,7 +1,13 @@
-import { pool, dbInitError } from "./db";
+import { pool, dbInitError, storageMode } from "./db";
 import { eq, and, sql, desc, ilike, max, inArray } from "drizzle-orm";
 import { db } from "./db";
 import * as schema from "@shared/schema";
+
+export { storageMode };
+
+function isDbAvailable(): boolean {
+  return db !== null && storageMode === "postgres";
+}
 
 function getDb() {
   if (!db) {
@@ -1116,9 +1122,15 @@ export const cache = {
       });
   },
 
-  async testConnection(): Promise<void> {
+  async testConnection(): Promise<{ ok: boolean; mode: string }> {
+    if (!isDbAvailable()) {
+      return { ok: true, mode: "no-db" };
+    }
     await getDb().execute(sql`SELECT 1`);
+    return { ok: true, mode: "postgres" };
   },
+
+  isDbAvailable,
 };
 
 export default cache;

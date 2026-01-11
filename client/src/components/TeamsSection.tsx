@@ -166,7 +166,7 @@ export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
                             {formatRecord(team.record)}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            {team.points_for?.toFixed(1)} PF
+                            {team.points_for != null ? team.points_for.toFixed(1) : "—"} PF
                           </div>
                         </div>
                         

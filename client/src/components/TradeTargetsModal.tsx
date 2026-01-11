@@ -266,7 +266,7 @@ export function TradeTargetsModal({
                       <span className="font-medium">
                         {target.opponent_display_name || target.opponent_username}
                       </span>
-                      {target.target_score > 0 && (
+                      {target.target_score != null && target.target_score > 0 && (
                         <Badge variant="secondary" className="text-xs">
                           Score: {target.target_score.toFixed(0)}
                         </Badge>
