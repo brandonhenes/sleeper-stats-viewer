@@ -248,8 +248,8 @@ export const leagueGroupSchema = z.object({
   league_type: z.enum(["dynasty", "redraft", "unknown"]).optional(), // derived from settings
   is_active: z.boolean().optional(), // true if user has roster in latest season and league is active
   latest_league_id: z.string().optional(), // the latest league_id for this group
-  trade_summary: tradeSummarySchema.optional(), // trade stats for this group
-  placement: seasonPlacementSchema.optional(), // most recent season placement for display on tile
+  trade_summary: tradeSummarySchema.nullish(), // trade stats for this group (null in no-db mode)
+  placement: seasonPlacementSchema.nullish(), // most recent season placement for display on tile
 });
 
 // Original league schema (kept for backwards compatibility)
