@@ -1,0 +1,33 @@
+You are a senior reliability engineer debugging my existing Replit app “Sleeper Scout”. DO NOT rewrite the app. Make minimal, surgical changes.
+
+Goal: Fix the published (production) site returning 500s on:
+- GET /api/overview?username=...
+- GET /api/players/exposure
+- GET /api/scouting/:username
+and stop infinite loading on the frontend caused by these failures.
+
+Evidence from production logs:
+- “Deployment mode: Using production database (host: kv.replit.com)”
+- “Initial storage mode: postgres (verification pending)”
+- “Database connection failed, switching to no-db mode: Connection terminated due to connection timeout”
+- Then endpoints fail with: “Database unavailable: Database not initialized”
+
+This strongly suggests the code is mistakenly trying to connect to kv.replit.com as Postgres, or is selecting the wrong env var / building the DB URL incorrectly in production.
+
+Hard requirements:
+1) Find where the DB connection string is chosen (likely server/db.ts). Add a startup log that prints a REDACTED summary of the selected DB URL: protocol, host, port, and which env var was used (do not print user/pass).
+2) Only treat a DB URL as Postgres if it starts with postgres:// or postgresql://.
+   - If the URL is https://kv.replit.com/... or host is kv.replit.com, that is NOT Postgres. Do not attempt pg connections to it.
+3) In production, if a valid Postgres URL is available, connect using pg Pool with SSL enabled (safe defaults) and a short connection timeout.
+4) If Postgres is not available or connect fails, enter a clean fallback mode:
+   - /api/overview should still work by fetching from Sleeper directly
+   - endpoints that require DB should return 200 with a structured “dbUnavailable” payload (or 503 with a clear message) WITHOUT crashing the frontend
+   - do not throw unhandled errors
+5) Fix the frontend infinite loading behavior: ensure failed API calls surface a visible error state quickly (no endless spinner). Reduce retries for 500/503.
+6) After changes, run and verify locally in preview AND ensure “npm run build” + “node ./dist/index.cjs” works.
+7) Provide a short checklist: which env vars production must have (DATABASE_URL/POSTGRES_URL etc) and where in Replit UI to confirm them.
+
+Output:
+- List of files changed and why.
+- The exact log line that will confirm it’s using the correct Postgres host (not kv.replit.com).
+- The expected behavior when DB is unavailable (no infinite load).
