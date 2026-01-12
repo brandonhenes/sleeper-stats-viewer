@@ -1,0 +1,142 @@
+1) Global Season Selector (controls everything)
+What you’re building
+
+A single dropdown (or segmented control) that sets season=YYYY and the whole app uses it.
+
+Where to implement (client)
+
+You already have React Query hooks in client/src/hooks/use-sleeper.ts (I saw useSleeperOverview, etc.). We’re going to:
+
+Store selectedSeason in:
+
+URL query param: ?season=2025 (best)
+
+localStorage fallback (so it persists)
+
+Make overview + pages use that season.
+
+Step-by-step
+
+Step 1 — Add a season hook
+Create: client/src/hooks/useSeason.ts
+
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+
+const LS_KEY = "sleeper_selected_season";
+
+export function useSeason(availableSeasons?: number[]) {
+  const [params, setParams] = useSearchParams();
+
+  const urlSeasonRaw = params.get("season");
+  const urlSeason = urlSeasonRaw ? Number(urlSeasonRaw) : undefined;
+
+  const storageSeasonRaw = localStorage.getItem(LS_KEY);
+  const storageSeason = storageSeasonRaw ? Number(storageSeasonRaw) : undefined;
+
+  const [season, setSeasonState] = useState<number | undefined>(() => {
+    if (Number.isFinite(urlSeason)) return urlSeason;
+    if (Number.isFinite(storageSeason)) return storageSeason;
+    return undefined;
+  });
+
+  // keep state in sync if URL changes externally
+  useEffect(() => {
+    if (Number.isFinite(urlSeason) && urlSeason !== season) {
+      setSeasonState(urlSeason);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSeasonRaw]);
+
+  // persist season -> URL + localStorage
+  useEffect(() => {
+    if (!Number.isFinite(season)) return;
+
+    localStorage.setItem(LS_KEY, String(season));
+
+    const next = new URLSearchParams(params);
+    next.set("season", String(season));
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [season]);
+
+  const seasons = useMemo(() => {
+    const list = (availableSeasons ?? []).filter(Number.isFinite);
+    list.sort((a, b) => b - a);
+    return list;
+  }, [availableSeasons]);
+
+  return { season, setSeason: setSeasonState, seasons };
+}
+
+
+Step 2 — Add a SeasonSelector component
+Create: client/src/components/SeasonSelector.tsx
+
+type Props = {
+  season?: number;
+  seasons: number[];
+  onChange: (season: number) => void;
+};
+
+export function SeasonSelector({ season, seasons, onChange }: Props) {
+  if (!seasons.length) return null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ opacity: 0.8, fontSize: 12 }}>Season</span>
+      <select
+        value={season ?? ""}
+        onChange={(e) => onChange(Number(e.target.value))}
+      >
+        {seasons.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+
+Step 3 — Wire it into the Profile/League pages
+Find the page that loads overview (your profile page that shows league tiles). Search for useSleeperOverview(.
+
+Derive availableSeasons from overview.leagues
+
+Pick a default season that avoids the “new season has no data” trap:
+
+Default season rule (simple + correct):
+
+If the newest season has mostly status = "pre_draft" or “no matchups yet”, default to the latest season that has status = "complete" (or at least has results).
+
+Still allow selecting the current season explicitly.
+
+Add helper:
+
+function pickDefaultSeason(leagues: any[]): number | undefined {
+  const seasons = Array.from(new Set(leagues.map((l) => Number(l.season)).filter(Number.isFinite))).sort((a,b)=>b-a);
+  if (!seasons.length) return undefined;
+
+  // prefer latest season with any completed leagues
+  for (const s of seasons) {
+    const inSeason = leagues.filter((l) => Number(l.season) === s);
+    const hasComplete = inSeason.some((l) => l.status === "complete");
+    if (hasComplete) return s;
+  }
+
+  // else just newest season
+  return seasons[0];
+}
+
+
+Then in the page:
+
+const { season, setSeason, seasons } = useSeason(availableSeasons);
+
+if season is undefined, set it to pickDefaultSeason(overview.leagues)
+
+filter displayed tiles to league.season === season
+
+That alone fixes “what year is this even referencing?” and “new season starts and there’s no data” (because it won’t silently dump you into preseason emptiness).

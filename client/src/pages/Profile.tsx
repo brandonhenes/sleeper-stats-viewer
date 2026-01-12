@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, Link } from "wouter";
 import { useSleeperOverview, useSleeperSync, useSyncStatus } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 import { Layout } from "@/components/Layout";
+import { useSeason } from "@/hooks/useSeason";
+import { SeasonSelector } from "@/components/SeasonSelector";
 
 type LeagueType = "all" | "dynasty" | "redraft" | "unknown";
 type ViewMode = "active" | "history";
@@ -92,6 +94,19 @@ export default function Profile() {
 
   const allLeagueGroups = data?.league_groups || [];
   
+  // Extract available seasons from all league groups
+  const availableSeasons = useMemo(() => {
+    const seasons = new Set<number>();
+    allLeagueGroups.forEach(g => {
+      for (let s = g.min_season; s <= g.max_season; s++) {
+        seasons.add(s);
+      }
+    });
+    return Array.from(seasons).sort((a, b) => b - a);
+  }, [allLeagueGroups]);
+
+  const { season, setSeason, seasons } = useSeason(availableSeasons);
+
   // Split into active vs history groups based on is_active flag
   const activeGroups = allLeagueGroups.filter(g => g.is_active !== false);
   const historyGroups = allLeagueGroups.filter(g => g.is_active === false);
@@ -99,7 +114,12 @@ export default function Profile() {
   // Use the selected view mode to determine base groups
   const leagueGroups = viewMode === "active" ? activeGroups : historyGroups;
   
-  const filteredGroups = leagueGroups.filter((g) => {
+  // Filter by season (show groups that include the selected season)
+  const seasonFilteredGroups = season 
+    ? leagueGroups.filter(g => g.min_season <= season && g.max_season >= season)
+    : leagueGroups;
+  
+  const filteredGroups = seasonFilteredGroups.filter((g) => {
     if (typeFilter === "all") return true;
     const leagueType = g.league_type || "unknown";
     return leagueType === typeFilter;
@@ -240,6 +260,14 @@ export default function Profile() {
               )}
 
               <div className="flex items-center gap-4 mb-6 flex-wrap">
+                <SeasonSelector 
+                  season={season} 
+                  seasons={seasons} 
+                  onChange={setSeason} 
+                />
+                
+                <div className="h-6 w-px bg-border" />
+                
                 <div className="flex gap-2">
                   <Button
                     variant={viewMode === "active" ? "default" : "outline"}
