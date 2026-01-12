@@ -454,3 +454,21 @@ export const targetsResponseSchema = z.object({
 export type MatchedAsset = z.infer<typeof matchedAssetSchema>;
 export type TradeTarget = z.infer<typeof tradeTargetSchema>;
 export type TargetsResponse = z.infer<typeof targetsResponseSchema>;
+
+// League Summary schema (for tile display)
+export const leagueSummarySchema = z.object({
+  league_id: z.string(),
+  season: z.number(),
+  status: z.string(),
+  final_finish: z.string().nullable(),
+  regular_rank: z.number().nullable(),
+  wins: z.number(),
+  losses: z.number(),
+  ties: z.number(),
+  win_pct: z.number(),
+  points_for: z.number(),
+  points_against: z.number().nullable(),
+  total_rosters: z.number(),
+});
+
+export type LeagueSummary = z.infer<typeof leagueSummarySchema>;

@@ -79,6 +79,14 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 12, 2026 (League Summary Tile Fixes)
+**Bug Fixes**:
+- Fixed points-for/against calculation with proper Number() parsing and operator precedence
+- Fixed ranking computation to parse all roster stats as numbers before sorting
+- Added schema validation via leagueSummarySchema.parse() to prevent malformed responses
+- Updated useLeagueSummary hook to return LeagueSummary | null type with proper retry settings
+- Added loading state and null handling in LeagueGroupCard for graceful degradation
+
 ### January 11, 2026 (Production Reliability + UX Improvements)
 **Production Reliability**:
 - Fixed 500 errors caused by DATABASE_URL pointing to internal "helium" hostname in deployment

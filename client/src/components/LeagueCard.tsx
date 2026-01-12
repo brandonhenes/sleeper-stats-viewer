@@ -3,10 +3,11 @@ import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Trophy, Users, Calendar, ArrowRightLeft, Target } from "lucide-react";
+import { Trophy, Users, Calendar, ArrowRightLeft, Target, TrendingUp, Hash } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LeagueGroup } from "@shared/schema";
 import { TradeTargetsModal } from "./TradeTargetsModal";
+import { useLeagueSummary } from "@/hooks/use-sleeper";
 
 interface LeagueGroupCardProps {
   group: LeagueGroup;
@@ -16,8 +17,20 @@ interface LeagueGroupCardProps {
 
 export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps) {
   const [targetsOpen, setTargetsOpen] = useState(false);
+  
+  // Fetch summary for latest league in group
+  const { data: summary, isLoading: summaryLoading } = useLeagueSummary(
+    group.latest_league_id, 
+    username
+  );
+  
   // Format W-L or W-L-T record
   const formatRecord = () => {
+    if (summary) {
+      const { wins, losses, ties } = summary;
+      if (ties > 0) return `${wins}-${losses}-${ties}`;
+      return `${wins}-${losses}`;
+    }
     const { wins, losses, ties } = group.overall_record;
     if (ties > 0) {
       return `${wins}-${losses}-${ties}`;
@@ -54,20 +67,22 @@ export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps
                   {formatYears()}
                 </Badge>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {group.placement && (
+                  {(summary?.final_finish || group.placement?.playoff_finish) && (
                     <Badge 
-                      variant={group.placement.playoff_finish === "Champion" ? "default" : "outline"}
+                      variant={(summary?.final_finish === "Champion" || group.placement?.playoff_finish === "Champion") ? "default" : "outline"}
                       className="gap-1"
                       data-testid={`badge-placement-${group.group_id}`}
                     >
-                      {group.placement.playoff_finish === "Champion" ? (
+                      {(summary?.final_finish === "Champion" || group.placement?.playoff_finish === "Champion") ? (
                         <>
                           <Trophy className="w-3 h-3" />
                           Champion
                         </>
-                      ) : group.placement.finish_place ? (
+                      ) : summary?.final_finish ? (
+                        summary.final_finish
+                      ) : group.placement?.finish_place ? (
                         `#${group.placement.finish_place}`
-                      ) : group.placement.regular_rank ? (
+                      ) : group.placement?.regular_rank ? (
                         `Reg: #${group.placement.regular_rank}`
                       ) : null}
                     </Badge>
@@ -81,6 +96,34 @@ export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps
               <h3 className="text-xl font-display font-bold text-foreground group-hover:text-primary transition-colors line-clamp-2">
                 {group.name}
               </h3>
+
+              {summary ? (
+                <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                  <div className="bg-secondary/30 rounded-md p-2">
+                    <div className="text-xs text-muted-foreground">Rank</div>
+                    <div className="font-bold text-foreground">
+                      {summary.regular_rank ? `#${summary.regular_rank}` : "-"}
+                    </div>
+                  </div>
+                  <div className="bg-secondary/30 rounded-md p-2">
+                    <div className="text-xs text-muted-foreground">Win%</div>
+                    <div className="font-bold text-foreground">{summary.win_pct.toFixed(1)}%</div>
+                  </div>
+                  <div className="bg-secondary/30 rounded-md p-2">
+                    <div className="text-xs text-muted-foreground">PF</div>
+                    <div className="font-bold text-foreground">{summary.points_for.toFixed(1)}</div>
+                  </div>
+                </div>
+              ) : summaryLoading ? (
+                <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="bg-secondary/30 rounded-md p-2 animate-pulse">
+                      <div className="text-xs text-muted-foreground">-</div>
+                      <div className="font-bold text-foreground">...</div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
               {group.trade_summary && group.trade_summary.trade_count > 0 && (
                 <div className="pt-3 border-t border-border/50 space-y-1">

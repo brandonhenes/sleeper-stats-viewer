@@ -4,6 +4,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { cache, type SyncJob } from "./cache";
 import type { LeagueGroup } from "@shared/schema";
+import { leagueSummarySchema } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { getStorageMode } from "./db";
 
@@ -1092,6 +1093,116 @@ export async function registerRoutes(
       res.json({ leagueId, users, rosters });
     } catch (e) {
       console.error("League error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/summary - Get league summary for tile display
+  app.get("/api/league/:leagueId/summary", async (req, res) => {
+    try {
+      const { leagueId } = req.params;
+      const { username } = req.query;
+
+      if (!username || typeof username !== "string") {
+        return res.status(400).json({ message: "username query param required" });
+      }
+
+      // Fetch league info, rosters, and bracket in parallel
+      const [leagueInfo, rosters, bracket] = await Promise.all([
+        jget(`${BASE}/league/${leagueId}`),
+        getLeagueRosters(leagueId),
+        jget(`${BASE}/league/${leagueId}/winners_bracket`),
+      ]);
+
+      if (!leagueInfo || !rosters) {
+        return res.status(404).json({ message: "League not found" });
+      }
+
+      // Find user's roster
+      const cachedUser = await cache.getUserByUsername(username);
+      const userId = cachedUser?.user_id;
+      
+      let myRoster = rosters.find((r: any) => r.owner_id === userId);
+      if (!myRoster && userId) {
+        myRoster = rosters.find((r: any) => r.co_owners?.includes(userId));
+      }
+
+      if (!myRoster) {
+        return res.status(404).json({ message: "User roster not found in league" });
+      }
+
+      const settings = myRoster.settings || {};
+      const wins = Number(settings.wins) || 0;
+      const losses = Number(settings.losses) || 0;
+      const ties = Number(settings.ties) || 0;
+      const totalGames = wins + losses + ties;
+      const winPct = totalGames > 0 ? (wins + ties * 0.5) / totalGames : 0;
+      const fptsMain = Number(settings.fpts) || 0;
+      const fptsDecimal = Number(settings.fpts_decimal) || 0;
+      const pf = fptsMain + fptsDecimal / 100;
+      const paMain = settings.fpts_against !== undefined ? Number(settings.fpts_against) : null;
+      const paDecimal = Number(settings.fpts_against_decimal) || 0;
+      const pa = paMain !== null ? paMain + paDecimal / 100 : null;
+
+      // Compute regular season rank by wins/pf (must parse all rosters as numbers)
+      const sortedRosters = [...rosters].sort((a: any, b: any) => {
+        const aWins = Number(a.settings?.wins) || 0;
+        const bWins = Number(b.settings?.wins) || 0;
+        if (bWins !== aWins) return bWins - aWins;
+        const aPf = (Number(a.settings?.fpts) || 0) + (Number(a.settings?.fpts_decimal) || 0) / 100;
+        const bPf = (Number(b.settings?.fpts) || 0) + (Number(b.settings?.fpts_decimal) || 0) / 100;
+        return bPf - aPf;
+      });
+      const regularRank = sortedRosters.findIndex((r: any) => r.roster_id === myRoster.roster_id) + 1;
+
+      // Determine playoff finish from bracket
+      let finalFinish: string | null = null;
+      const status = leagueInfo.status || "unknown";
+
+      if (bracket && Array.isArray(bracket) && bracket.length > 0 && status === "complete") {
+        const maxRound = Math.max(...bracket.map((m: any) => m.r || 0));
+        const finalMatch = bracket.find((m: any) => m.r === maxRound);
+        
+        if (finalMatch) {
+          if (finalMatch.w === myRoster.roster_id) {
+            finalFinish = "Champion";
+          } else if (finalMatch.l === myRoster.roster_id) {
+            finalFinish = "Runner-up";
+          } else {
+            // Check semifinal
+            const semiFinals = bracket.filter((m: any) => m.r === maxRound - 1);
+            for (const sf of semiFinals) {
+              if (sf.l === myRoster.roster_id) {
+                finalFinish = "Semifinalist";
+                break;
+              }
+            }
+          }
+        }
+      } else if (status !== "complete") {
+        finalFinish = "In Season";
+      }
+
+      const summary = {
+        league_id: leagueId,
+        season: Number(leagueInfo.season),
+        status,
+        final_finish: finalFinish,
+        regular_rank: regularRank || null,
+        wins,
+        losses,
+        ties,
+        win_pct: Math.round(winPct * 1000) / 10,
+        points_for: Math.round(pf * 10) / 10,
+        points_against: pa !== null ? Math.round(pa * 10) / 10 : null,
+        total_rosters: rosters.length,
+      };
+      
+      // Validate response against schema
+      const validated = leagueSummarySchema.parse(summary);
+      res.json(validated);
+    } catch (e) {
+      console.error("League summary error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

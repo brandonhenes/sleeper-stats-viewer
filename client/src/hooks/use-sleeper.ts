@@ -755,3 +755,41 @@ export function useSeasonSummaries(groupId: string | undefined, username: string
     staleTime: 1000 * 60 * 10,
   });
 }
+
+// League Summary for tile display
+interface LeagueSummary {
+  league_id: string;
+  season: number;
+  status: string;
+  final_finish: string | null;
+  regular_rank: number | null;
+  wins: number;
+  losses: number;
+  ties: number;
+  win_pct: number;
+  points_for: number;
+  points_against: number | null;
+  total_rosters: number;
+}
+
+// GET /api/league/:leagueId/summary - Get league summary for tile
+export function useLeagueSummary(leagueId: string | undefined, username: string | undefined) {
+  return useQuery<LeagueSummary | null>({
+    queryKey: ["/api/league", leagueId, "summary", username],
+    queryFn: async () => {
+      if (!leagueId || !username) return null;
+      const url = `/api/league/${encodeURIComponent(leagueId)}/summary?username=${encodeURIComponent(username)}`;
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error("Failed to fetch league summary");
+      }
+      
+      return res.json();
+    },
+    enabled: !!leagueId && !!username,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    retry: false, // Don't retry on failure - fall back to basic data
+  });
+}
