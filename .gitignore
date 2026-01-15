@@ -1,6 +1,20 @@
-node_modules
-dist
+# deps
+node_modules/
+
+# builds
+dist/
+build/
+
+# env
+.env
+
+# OS junk
 .DS_Store
-server/public
-vite.config.ts.*
+
+# local db + sqlite sidecars
+*.db
+*.db-shm
+*.db-wal
+
+# archives
 *.tar.gz
