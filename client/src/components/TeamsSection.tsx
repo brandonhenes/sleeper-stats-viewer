@@ -46,9 +46,30 @@ interface Team {
 export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
   const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
   const [showCapital, setShowCapital] = useState(false);
+  // Per-team view mode: tracks which teams are showing capital (overrides global)
+  const [teamCapitalView, setTeamCapitalView] = useState<Map<number, boolean>>(new Map());
 
   const { data: teamsData, isLoading: teamsLoading } = useLeagueTeams(leagueId);
   const { data: capitalData, isLoading: capitalLoading } = useAllDraftCapital(leagueId);
+  
+  // Toggle per-team capital view
+  const toggleTeamCapitalView = (rosterId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTeamCapitalView(prev => {
+      const newMap = new Map(prev);
+      const current = newMap.get(rosterId) ?? showCapital;
+      newMap.set(rosterId, !current);
+      return newMap;
+    });
+  };
+  
+  // Get effective view mode for a team (per-team override or global default)
+  const getTeamViewMode = (rosterId: number): boolean => {
+    if (teamCapitalView.has(rosterId)) {
+      return teamCapitalView.get(rosterId)!;
+    }
+    return showCapital;
+  };
 
   if (!leagueId) {
     return null;
@@ -100,7 +121,10 @@ export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
         <Button 
           variant="outline" 
           size="sm"
-          onClick={() => setShowCapital(!showCapital)}
+          onClick={() => {
+            setShowCapital(!showCapital);
+            setTeamCapitalView(new Map()); // Reset per-team overrides
+          }}
           data-testid="button-toggle-capital"
         >
           <Layers className="w-4 h-4 mr-2" />
@@ -179,7 +203,19 @@ export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
 
                   <CollapsibleContent>
                     <div className="border-t p-4">
-                      {!showCapital ? (
+                      {/* Per-team toggle */}
+                      <div className="flex justify-end mb-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => toggleTeamCapitalView(team.roster_id, e)}
+                          data-testid={`button-team-toggle-${team.roster_id}`}
+                        >
+                          <Layers className="w-3 h-3 mr-1" />
+                          {getTeamViewMode(team.roster_id) ? "Roster" : "Capital"}
+                        </Button>
+                      </div>
+                      {!getTeamViewMode(team.roster_id) ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                           {team.players.map((player) => (
                             <div 

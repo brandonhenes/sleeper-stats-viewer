@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams, Link } from "wouter";
 import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, useTradeTiming, useAllPlay, useSeasonSummaries } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
@@ -57,15 +57,26 @@ export default function LeagueGroupDetails() {
   const [churnTimeframe, setChurnTimeframe] = useState<string>("season");
   const [draftCapitalYearFilter, setDraftCapitalYearFilter] = useState<string>("all");
   
-  const { data: draftCapitalData, isLoading: draftCapitalLoading } = useDraftCapital(latestLeagueId, username);
-  const { data: churnData, isLoading: churnLoading } = useChurnStats(latestLeagueId, username, churnTimeframe, groupId);
-  const { data: tradeTimingData, isLoading: tradeTimingLoading } = useTradeTiming(latestLeagueId, username);
-  const { data: allPlayData, isLoading: allPlayLoading } = useAllPlay(latestLeagueId, username);
   const { data: seasonData, isLoading: seasonLoading } = useSeasonSummaries(groupId, username);
   
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const displayedSeason = selectedSeason ?? seasonData?.seasons[0]?.season ?? null;
   const selectedSeasonData = seasonData?.seasons.find(s => s.season === displayedSeason);
+  
+  // Compute season-aware activeLeagueId using seasons_to_league mapping
+  const activeLeagueId = useMemo(() => {
+    if (displayedSeason && leagueGroup?.seasons_to_league) {
+      const match = leagueGroup.seasons_to_league.find(s => s.season === displayedSeason);
+      if (match) return match.league_id;
+    }
+    return latestLeagueId;
+  }, [displayedSeason, leagueGroup?.seasons_to_league, latestLeagueId]);
+  
+  // Use activeLeagueId (season-aware) for all hooks
+  const { data: draftCapitalData, isLoading: draftCapitalLoading } = useDraftCapital(activeLeagueId, username);
+  const { data: churnData, isLoading: churnLoading } = useChurnStats(activeLeagueId, username, churnTimeframe, groupId);
+  const { data: tradeTimingData, isLoading: tradeTimingLoading } = useTradeTiming(activeLeagueId, username);
+  const { data: allPlayData, isLoading: allPlayLoading } = useAllPlay(activeLeagueId, username);
 
   const backLink = username ? `/u/${username}` : "/";
 
@@ -628,18 +639,18 @@ export default function LeagueGroupDetails() {
 
                 {/* Scouting Leaderboards */}
                 <div className="mt-6">
-                  <ScoutingSection leagueId={latestLeagueId} username={username} />
+                  <ScoutingSection leagueId={activeLeagueId} username={username} />
                 </div>
               </TabsContent>
 
               {/* TEAMS TAB */}
               <TabsContent value="teams" className="mt-6">
-                <TeamsSection leagueId={latestLeagueId} username={username} />
+                <TeamsSection leagueId={activeLeagueId} username={username} />
               </TabsContent>
 
               {/* TRADES TAB */}
               <TabsContent value="trades" className="mt-6">
-                <TradesSection groupId={groupId} leagueId={latestLeagueId} username={username} />
+                <TradesSection groupId={groupId} leagueId={activeLeagueId} username={username} />
                 
                 {/* Trade Log */}
                 <Card className="p-6 mt-6">
@@ -933,8 +944,8 @@ export default function LeagueGroupDetails() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
                 <div>
-                  <span className="text-muted-foreground">latestLeagueId:</span>
-                  <div className="truncate">{latestLeagueId || 'N/A'}</div>
+                  <span className="text-muted-foreground">activeLeagueId:</span>
+                  <div className="truncate">{activeLeagueId || 'N/A'}</div>
                 </div>
                 <div>
                   <span className="text-muted-foreground">groupId:</span>
@@ -963,12 +974,12 @@ export default function LeagueGroupDetails() {
       </div>
 
       {/* Trade Targets Modal */}
-      {latestLeagueId && (
+      {activeLeagueId && (
         <TradeTargetsModal
           isOpen={showTargetsModal}
           onClose={() => setShowTargetsModal(false)}
           username={username}
-          leagueId={latestLeagueId}
+          leagueId={activeLeagueId}
           leagueName={leagueGroup.name}
         />
       )}
