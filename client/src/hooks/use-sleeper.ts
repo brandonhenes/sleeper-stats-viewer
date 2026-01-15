@@ -800,3 +800,35 @@ export function useLeagueSummary(leagueId: string | undefined, username: string 
     retry: false, // Don't retry on failure - fall back to basic data
   });
 }
+
+// Market values response type
+interface MarketValue {
+  player_id: string;
+  fp_rank: number | null;
+  fp_tier: number | null;
+  trade_value_std: number | null;
+  trade_value_effective: number | null;
+}
+
+interface MarketValuesResponse {
+  as_of_year: number;
+  values: MarketValue[];
+}
+
+// GET /api/market-values - Get market values for player IDs
+export function useMarketValues(
+  playerIds: string[], 
+  opts: { asOf: number; sf: boolean; tep: boolean }
+) {
+  return useQuery<MarketValuesResponse>({
+    queryKey: ["/api/market-values", opts.asOf, opts.sf, opts.tep, playerIds.join(",")],
+    queryFn: async () => {
+      const url = `/api/market-values?asOf=${opts.asOf}&sf=${opts.sf ? 1 : 0}&tep=${opts.tep ? 1 : 0}&ids=${encodeURIComponent(playerIds.join(","))}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch market values");
+      return res.json();
+    },
+    enabled: playerIds.length > 0,
+    staleTime: 1000 * 60 * 60, // Cache for 1 hour
+  });
+}
