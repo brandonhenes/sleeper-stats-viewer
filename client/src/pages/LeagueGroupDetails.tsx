@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams, Link } from "wouter";
-import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, useTradeTiming, useAllPlay, useSeasonSummaries } from "@/hooks/use-sleeper";
+import { useSleeperOverview, useH2h, useTrades, useDraftCapital, useChurnStats, useTradeTiming, useAllPlay, useSeasonSummaries, useLeagueDetails } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +80,11 @@ export default function LeagueGroupDetails() {
   // Season-aware H2H and trades hooks
   const { data: h2hData, isLoading: h2hLoading, error: h2hError } = useH2h(groupId, username, displayedSeason);
   const { data: tradesData, isLoading: tradesLoading } = useTrades(groupId, viewMode, displayedSeason);
+  
+  // Fetch league details to get format flags (superflex/TEP)
+  const { data: leagueDetails } = useLeagueDetails(activeLeagueId || "");
+  const isSuperflex = leagueDetails?.is_superflex ?? false;
+  const isTep = leagueDetails?.is_tep ?? false;
 
   const backLink = username ? `/u/${username}` : "/";
 
@@ -648,12 +653,12 @@ export default function LeagueGroupDetails() {
 
               {/* TEAMS TAB */}
               <TabsContent value="teams" className="mt-6">
-                <TeamsSection leagueId={activeLeagueId} username={username} season={displayedSeason ?? undefined} />
+                <TeamsSection leagueId={activeLeagueId} username={username} season={displayedSeason ?? undefined} isSuperflex={isSuperflex} isTep={isTep} />
               </TabsContent>
 
               {/* TRADES TAB */}
               <TabsContent value="trades" className="mt-6">
-                <TradesSection groupId={groupId} leagueId={activeLeagueId} username={username} />
+                <TradesSection groupId={groupId} leagueId={activeLeagueId} username={username} season={displayedSeason ?? undefined} isSuperflex={isSuperflex} isTep={isTep} />
                 
                 {/* Trade Log */}
                 <Card className="p-6 mt-6">

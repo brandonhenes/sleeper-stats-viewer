@@ -23,6 +23,8 @@ interface TeamsSectionProps {
   leagueId: string | undefined;
   username?: string;
   season?: number;
+  isSuperflex?: boolean;
+  isTep?: boolean;
 }
 
 interface Player {
@@ -44,7 +46,7 @@ interface Team {
   player_count: number;
 }
 
-export function TeamsSection({ leagueId, username, season }: TeamsSectionProps) {
+export function TeamsSection({ leagueId, username, season, isSuperflex = false, isTep = false }: TeamsSectionProps) {
   const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
   const [showCapital, setShowCapital] = useState(false);
   // Per-team view mode: tracks which teams are showing capital (overrides global)
@@ -67,9 +69,9 @@ export function TeamsSection({ leagueId, username, season }: TeamsSectionProps) 
     return Array.from(ids);
   }, [teamsData?.teams]);
   
-  // Use provided season or default to 2025
-  const marketYear = season || 2025;
-  const { data: marketData } = useMarketValues(allPlayerIds, { asOf: marketYear, sf: false, tep: false });
+  // Use provided season or default to current year, and use league format flags
+  const marketYear = season || new Date().getFullYear();
+  const { data: marketData } = useMarketValues(allPlayerIds, { asOf: marketYear, sf: isSuperflex, tep: isTep });
   
   // Create a map for quick lookups
   const marketValueMap = useMemo(() => {

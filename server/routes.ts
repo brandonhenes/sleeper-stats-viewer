@@ -1116,21 +1116,38 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/league/:leagueId - Get league details (users + rosters)
+  // GET /api/league/:leagueId - Get league details (users + rosters + format)
   app.get(api.sleeper.league.path, async (req, res) => {
     try {
       const { leagueId } = req.params;
 
-      const [users, rosters] = await Promise.all([
+      const [users, rosters, leagueInfo] = await Promise.all([
         getLeagueUsers(leagueId),
         getLeagueRosters(leagueId),
+        jget(`${BASE}/league/${leagueId}`),
       ]);
 
       if (!users || !rosters) {
         return res.status(404).json({ message: "League details not found" });
       }
 
-      res.json({ leagueId, users, rosters });
+      // Detect superflex and TEP from roster_positions and scoring_settings
+      let is_superflex = false;
+      let is_tep = false;
+      
+      if (leagueInfo) {
+        const rosterPositions: string[] = leagueInfo.roster_positions || [];
+        // Superflex: has "SUPER_FLEX" position slot
+        is_superflex = rosterPositions.includes("SUPER_FLEX");
+        
+        // TEP (TE Premium): check scoring_settings for bonus_rec_te > 0
+        const scoringSettings = leagueInfo.scoring_settings || {};
+        const tePremium = scoringSettings.bonus_rec_te || 0;
+        const teRecBonus = scoringSettings.rec_te || 0;
+        is_tep = tePremium > 0 || teRecBonus > (scoringSettings.rec || 0);
+      }
+
+      res.json({ leagueId, users, rosters, is_superflex, is_tep });
     } catch (e) {
       console.error("League error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });

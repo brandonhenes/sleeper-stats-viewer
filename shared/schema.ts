@@ -347,6 +347,8 @@ export const leagueDetailsResponseSchema = z.object({
   leagueId: z.string(),
   users: z.array(leagueUserSchema),
   rosters: z.array(rosterSchema),
+  is_superflex: z.boolean().optional(),
+  is_tep: z.boolean().optional(),
 });
 
 // Sync response schema for POST /api/sync
