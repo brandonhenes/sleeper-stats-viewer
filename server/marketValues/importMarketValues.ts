@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { parse } from "csv-parse/sync";
 import cache from "../cache";
 
 interface FPRanking {
@@ -53,21 +54,40 @@ function parseNum(raw: string | undefined): number | null {
 }
 
 function parseFPCsv(content: string): FPRanking[] {
-  const lines = content.split("\n");
+  if (!content.trim()) return [];
+  
+  const records = parse(content, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_quotes: true,
+    relax_column_count: true,
+  });
+  
   const results: FPRanking[] = [];
   
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
+  for (const row of records) {
+    const rankKey = Object.keys(row).find(k => k.toLowerCase().includes("rank") || k === "RK");
+    const tierKey = Object.keys(row).find(k => k.toLowerCase().includes("tier"));
+    const nameKey = Object.keys(row).find(k => 
+      k.toLowerCase().includes("player") || k.toLowerCase().includes("name")
+    );
+    const teamKey = Object.keys(row).find(k => k.toLowerCase().includes("team"));
+    const posKey = Object.keys(row).find(k => k.toLowerCase().includes("pos"));
     
-    const match = line.match(/^"(\d+)",(\d+),"([^"]+)",([^,]+),"([^"]+)"/);
-    if (match) {
+    const rank = parseNum(row[rankKey || "RK"] || row["\"RK\""]);
+    const tier = parseNum(row[tierKey || "TIER"] || row["Tier"]);
+    const playerName = row[nameKey || "Player"] || row["PLAYER NAME"] || "";
+    const team = row[teamKey || "Team"] || row["TEAM"] || "";
+    const position = (row[posKey || "Pos"] || row["POS"] || "").replace(/\d+$/, "");
+    
+    if (rank && playerName) {
       results.push({
-        rank: parseInt(match[1], 10),
-        tier: parseInt(match[2], 10),
-        playerName: match[3],
-        team: match[4],
-        position: match[5].replace(/\d+$/, ""),
+        rank,
+        tier: tier || 0,
+        playerName: String(playerName).trim(),
+        team: String(team).trim(),
+        position: String(position).trim(),
       });
     }
   }
@@ -76,26 +96,40 @@ function parseFPCsv(content: string): FPRanking[] {
 }
 
 function parseTradeValuesCsv(content: string): TradeValue[] {
-  const lines = content.split("\n");
+  if (!content.trim()) return [];
+  
+  const records = parse(content, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_quotes: true,
+    relax_column_count: true,
+  });
+  
   const results: TradeValue[] = [];
   
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
+  for (const row of records) {
+    const nameKey = Object.keys(row).find(k => 
+      k.toLowerCase().includes("name") || k.toLowerCase().includes("player")
+    ) || Object.keys(row)[0];
+    const teamKey = Object.keys(row).find(k => k.toLowerCase().includes("team")) || Object.keys(row)[1];
+    const posKey = Object.keys(row).find(k => k.toLowerCase().includes("pos")) || Object.keys(row)[2];
+    const valueKey = Object.keys(row).find(k => 
+      k.toLowerCase().includes("value") || k.toLowerCase().includes("trade")
+    ) || Object.keys(row)[3];
+    const sfTepKey = Object.keys(row)[4];
+    const changeKey = Object.keys(row).find(k => k.toLowerCase().includes("change")) || Object.keys(row)[5];
     
-    const parts = line.split(",");
-    if (parts.length < 4) continue;
-    
-    const name = parts[0];
-    const team = parts[1];
-    const position = parts[2];
+    const name = String(row[nameKey] || "").trim();
+    const team = String(row[teamKey] || "").trim();
+    const position = String(row[posKey] || "").trim();
     
     if (!name || name === "All Other QBs" || name === "All Other RBs" || 
         name === "All Other TEs" || name === "All Other WRs") continue;
     
-    const tradeValue = parseNum(parts[3]);
-    const sfOrTepValue = parseNum(parts[4]);
-    const valueChange = parts[5]?.trim() || null;
+    const tradeValue = parseNum(row[valueKey]);
+    const sfOrTepValue = sfTepKey ? parseNum(row[sfTepKey]) : null;
+    const valueChange = changeKey ? (row[changeKey]?.trim() || null) : null;
     
     results.push({
       name,
