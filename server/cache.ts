@@ -1130,6 +1130,91 @@ export const cache = {
   },
 
   isDbAvailable,
+
+  async getPlayerAliases(): Promise<Array<{ alias: string; player_id: string; note: string | null }>> {
+    const result = await getDb().select().from(schema.player_aliases);
+    return result.map(r => ({
+      alias: r.alias,
+      player_id: r.player_id,
+      note: r.note,
+    }));
+  },
+
+  async upsertMarketValue(data: {
+    player_id: string;
+    as_of_year: number;
+    fp_rank: number | null;
+    fp_tier: number | null;
+    trade_value_std: number | null;
+    trade_value_sf: number | null;
+    trade_value_tep: number | null;
+    trade_value_change: string | null;
+  }): Promise<void> {
+    const now = Date.now();
+    await getDb().insert(schema.player_market_values)
+      .values({
+        player_id: data.player_id,
+        as_of_year: data.as_of_year,
+        fp_rank: data.fp_rank,
+        fp_tier: data.fp_tier,
+        trade_value_std: data.trade_value_std,
+        trade_value_sf: data.trade_value_sf,
+        trade_value_tep: data.trade_value_tep,
+        trade_value_change: data.trade_value_change,
+        updated_at: now,
+      })
+      .onConflictDoUpdate({
+        target: [schema.player_market_values.player_id, schema.player_market_values.as_of_year],
+        set: {
+          fp_rank: data.fp_rank,
+          fp_tier: data.fp_tier,
+          trade_value_std: data.trade_value_std,
+          trade_value_sf: data.trade_value_sf,
+          trade_value_tep: data.trade_value_tep,
+          trade_value_change: data.trade_value_change,
+          updated_at: now,
+        },
+      });
+  },
+
+  async getMarketValuesByIds(playerIds: string[], asOfYear: number): Promise<Array<{
+    player_id: string;
+    position: string | null;
+    fp_rank: number | null;
+    fp_tier: number | null;
+    trade_value_std: number | null;
+    trade_value_sf: number | null;
+    trade_value_tep: number | null;
+  }>> {
+    if (playerIds.length === 0) return [];
+    
+    const result = await getDb()
+      .select({
+        player_id: schema.player_market_values.player_id,
+        fp_rank: schema.player_market_values.fp_rank,
+        fp_tier: schema.player_market_values.fp_tier,
+        trade_value_std: schema.player_market_values.trade_value_std,
+        trade_value_sf: schema.player_market_values.trade_value_sf,
+        trade_value_tep: schema.player_market_values.trade_value_tep,
+        position: schema.players_master.position,
+      })
+      .from(schema.player_market_values)
+      .leftJoin(schema.players_master, eq(schema.player_market_values.player_id, schema.players_master.player_id))
+      .where(and(
+        inArray(schema.player_market_values.player_id, playerIds),
+        eq(schema.player_market_values.as_of_year, asOfYear)
+      ));
+    
+    return result.map(r => ({
+      player_id: r.player_id,
+      position: r.position,
+      fp_rank: r.fp_rank,
+      fp_tier: r.fp_tier,
+      trade_value_std: r.trade_value_std,
+      trade_value_sf: r.trade_value_sf,
+      trade_value_tep: r.trade_value_tep,
+    }));
+  },
 };
 
 export default cache;
