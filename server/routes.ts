@@ -7,6 +7,7 @@ import type { LeagueGroup } from "@shared/schema";
 import { leagueSummarySchema } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { getStorageMode } from "./db";
+import { importMarketValues } from "./marketValues/importMarketValues";
 
 const BASE = "https://api.sleeper.app/v1";
 
@@ -4327,6 +4328,79 @@ export async function registerRoutes(
       });
     } catch (e) {
       console.error("Market trends error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/market-values - Get market values for a list of player IDs
+  // Query params:
+  //   ids: comma-separated player IDs (required)
+  //   asOf: year (default: 2025)
+  //   sf: 0 or 1 for superflex mode (default: 0)
+  //   tep: 0 or 1 for tight-end premium mode (default: 0)
+  app.get("/api/market-values", async (req, res) => {
+    try {
+      const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
+      const ids = idsParam.split(",").map(s => s.trim()).filter(Boolean);
+      const asOf = parseInt(req.query.asOf as string) || 2025;
+      const sf = String(req.query.sf || "0") === "1";
+      const tep = String(req.query.tep || "0") === "1";
+
+      if (ids.length === 0) {
+        return res.json({ as_of_year: asOf, values: [] });
+      }
+
+      const rows = await cache.getMarketValuesByIds(ids, asOf);
+      
+      const effectiveTradeValue = (row: {
+        position?: string | null;
+        trade_value_std?: number | null;
+        trade_value_sf?: number | null;
+        trade_value_tep?: number | null;
+      }): number | null => {
+        const base = row.trade_value_std ?? null;
+        const pos = row.position ?? null;
+        if (base === null && base !== 0) return null;
+        
+        if (sf && pos === "QB" && row.trade_value_sf != null) return row.trade_value_sf;
+        if (tep && pos === "TE" && row.trade_value_tep != null) return row.trade_value_tep;
+        return base;
+      };
+
+      const out = rows.map(r => ({
+        player_id: r.player_id,
+        fp_rank: r.fp_rank,
+        fp_tier: r.fp_tier,
+        trade_value_std: r.trade_value_std,
+        trade_value_effective: effectiveTradeValue({
+          position: r.position,
+          trade_value_std: r.trade_value_std,
+          trade_value_sf: r.trade_value_sf,
+          trade_value_tep: r.trade_value_tep,
+        }),
+      }));
+
+      res.json({ as_of_year: asOf, values: out });
+    } catch (e) {
+      console.error("Market values error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // POST /api/debug/import-market-values - Import market values from CSVs
+  // Query params:
+  //   asOf: year (default: 2025)
+  app.post("/api/debug/import-market-values", async (req, res) => {
+    try {
+      const asOf = parseInt(req.query.asOf as string) || 2025;
+      const result = await importMarketValues(asOf);
+      res.json({
+        success: true,
+        as_of_year: asOf,
+        ...result,
+      });
+    } catch (e) {
+      console.error("Import market values error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });
