@@ -133,13 +133,16 @@ export function useLeagueDetails(leagueId: string) {
   });
 }
 
-// GET /api/group/:groupId/h2h?username=...
-export function useH2h(groupId: string | undefined, username: string | undefined) {
+// GET /api/group/:groupId/h2h?username=...&season=...
+export function useH2h(groupId: string | undefined, username: string | undefined, season?: number | null) {
   return useQuery({
-    queryKey: [api.sleeper.h2h.path, groupId, username],
+    queryKey: [api.sleeper.h2h.path, groupId, username, season],
     queryFn: async () => {
       if (!groupId || !username) return null;
-      const url = `${buildUrl(api.sleeper.h2h.path, { groupId })}?username=${encodeURIComponent(username)}`;
+      let url = `${buildUrl(api.sleeper.h2h.path, { groupId })}?username=${encodeURIComponent(username)}`;
+      if (season) {
+        url += `&season=${season}`;
+      }
       const res = await fetch(url);
       
       if (!res.ok) {
@@ -155,12 +158,16 @@ export function useH2h(groupId: string | undefined, username: string | undefined
 
 // GET /api/group/:groupId/trades
 // mode: "current" = latest season only, "history" = all seasons
-export function useTrades(groupId: string | undefined, mode: "current" | "history" = "current") {
+// season: specific season to filter (overrides mode)
+export function useTrades(groupId: string | undefined, mode: "current" | "history" = "current", season?: number | null) {
   return useQuery({
-    queryKey: [api.sleeper.trades.path, groupId, mode],
+    queryKey: [api.sleeper.trades.path, groupId, mode, season],
     queryFn: async () => {
       if (!groupId) return null;
-      const url = `${buildUrl(api.sleeper.trades.path, { groupId })}?mode=${mode}`;
+      let url = `${buildUrl(api.sleeper.trades.path, { groupId })}?mode=${mode}`;
+      if (season) {
+        url += `&season=${season}`;
+      }
       const res = await fetch(url);
       
       if (!res.ok) {
