@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,24 @@ interface LeagueGroupCardProps {
   group: LeagueGroup;
   index: number;
   username?: string;
+  selectedSeason?: number | null;
 }
 
-export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps) {
+export function LeagueGroupCard({ group, index, username, selectedSeason }: LeagueGroupCardProps) {
   const [targetsOpen, setTargetsOpen] = useState(false);
   
-  // Fetch summary for latest league in group
+  // Get league_id for the selected season, fallback to latest
+  const activeLeagueId = useMemo(() => {
+    if (selectedSeason && group.seasons_to_league) {
+      const match = group.seasons_to_league.find(s => s.season === selectedSeason);
+      if (match) return match.league_id;
+    }
+    return group.latest_league_id;
+  }, [selectedSeason, group.seasons_to_league, group.latest_league_id]);
+  
+  // Fetch summary for the season-appropriate league in group
   const { data: summary, isLoading: summaryLoading } = useLeagueSummary(
-    group.latest_league_id, 
+    activeLeagueId, 
     username
   );
   
@@ -178,12 +188,12 @@ export function LeagueGroupCard({ group, index, username }: LeagueGroupCardProps
         </motion.div>
       </Link>
 
-      {username && group.latest_league_id && (
+      {username && activeLeagueId && (
         <TradeTargetsModal
           isOpen={targetsOpen}
           onClose={() => setTargetsOpen(false)}
           username={username}
-          leagueId={group.latest_league_id}
+          leagueId={activeLeagueId}
           leagueName={group.name}
         />
       )}

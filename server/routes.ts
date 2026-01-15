@@ -442,6 +442,12 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       };
     }
 
+    // Build season→league_id mapping for navigation
+    const seasonsToLeague = groupLeagues.map((l: typeof leagues[0]) => ({
+      season: l.season,
+      league_id: l.league_id,
+    }));
+
     result.push({
       group_id: groupId,
       name: groupLeagues[0].name, // most recent season name
@@ -455,6 +461,7 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       latest_league_id: latestLeague.league_id,
       trade_summary: tradeSummary,
       placement,
+      seasons_to_league: seasonsToLeague,
     });
   }
 

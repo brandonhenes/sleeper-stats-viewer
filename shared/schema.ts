@@ -237,6 +237,12 @@ export const seasonPlacementSchema = z.object({
   source: z.string().nullable(), // "bracket", "roster_settings", "unknown"
 });
 
+// Season → League mapping for season-aware navigation
+export const seasonLeagueMapSchema = z.object({
+  season: z.number(),
+  league_id: z.string(),
+});
+
 export const leagueGroupSchema = z.object({
   group_id: z.string(),
   name: z.string(), // most recent season name
@@ -250,6 +256,7 @@ export const leagueGroupSchema = z.object({
   latest_league_id: z.string().optional(), // the latest league_id for this group
   trade_summary: tradeSummarySchema.nullish(), // trade stats for this group (null in no-db mode)
   placement: seasonPlacementSchema.nullish(), // most recent season placement for display on tile
+  seasons_to_league: z.array(seasonLeagueMapSchema).optional(), // season → league_id mapping for navigation
 });
 
 // Original league schema (kept for backwards compatibility)

@@ -334,7 +334,13 @@ export default function Profile() {
               {hasLeagues && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {filteredGroups.map((group, idx) => (
-                    <LeagueGroupCard key={group.group_id} group={group} index={idx} username={username || ""} />
+                    <LeagueGroupCard 
+                      key={group.group_id} 
+                      group={group} 
+                      index={idx} 
+                      username={username || ""} 
+                      selectedSeason={season}
+                    />
                   ))}
                 </div>
               )}
