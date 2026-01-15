@@ -53,7 +53,7 @@ export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
   const { data: capitalData, isLoading: capitalLoading } = useAllDraftCapital(leagueId);
   
   // Toggle per-team capital view
-  const toggleTeamCapitalView = (rosterId: number, e: React.MouseEvent) => {
+  const toggleTeamCapitalView = (rosterId: number, e: { stopPropagation: () => void }) => {
     e.stopPropagation();
     setTeamCapitalView(prev => {
       const newMap = new Map(prev);

@@ -47,8 +47,7 @@ export default function LeagueGroupDetails() {
   const [showTargetsModal, setShowTargetsModal] = useState(false);
 
   const { data: overviewData, isLoading: overviewLoading } = useSleeperOverview(username);
-  const { data: h2hData, isLoading: h2hLoading, error: h2hError } = useH2h(groupId, username);
-  const { data: tradesData, isLoading: tradesLoading } = useTrades(groupId, viewMode);
+  // Note: H2H and trades are filtered by season in their respective hooks (updated below after displayedSeason is computed)
 
   const leagueGroup = overviewData?.league_groups.find((g) => g.group_id === groupId);
   
@@ -77,6 +76,10 @@ export default function LeagueGroupDetails() {
   const { data: churnData, isLoading: churnLoading } = useChurnStats(activeLeagueId, username, churnTimeframe, groupId);
   const { data: tradeTimingData, isLoading: tradeTimingLoading } = useTradeTiming(activeLeagueId, username);
   const { data: allPlayData, isLoading: allPlayLoading } = useAllPlay(activeLeagueId, username);
+  
+  // Season-aware H2H and trades hooks
+  const { data: h2hData, isLoading: h2hLoading, error: h2hError } = useH2h(groupId, username, displayedSeason);
+  const { data: tradesData, isLoading: tradesLoading } = useTrades(groupId, viewMode, displayedSeason);
 
   const backLink = username ? `/u/${username}` : "/";
 

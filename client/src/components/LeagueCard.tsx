@@ -19,14 +19,14 @@ interface LeagueGroupCardProps {
 export function LeagueGroupCard({ group, index, username, selectedSeason }: LeagueGroupCardProps) {
   const [targetsOpen, setTargetsOpen] = useState(false);
   
-  // Get league_id for the selected season, fallback to latest
+  // Get league_id for the selected season, fallback to latest or first available
   const activeLeagueId = useMemo(() => {
     if (selectedSeason && group.seasons_to_league) {
       const match = group.seasons_to_league.find(s => s.season === selectedSeason);
       if (match) return match.league_id;
     }
-    return group.latest_league_id;
-  }, [selectedSeason, group.seasons_to_league, group.latest_league_id]);
+    return group.latest_league_id || group.league_ids[group.league_ids.length - 1];
+  }, [selectedSeason, group.seasons_to_league, group.latest_league_id, group.league_ids]);
   
   // Fetch summary for the season-appropriate league in group
   const { data: summary, isLoading: summaryLoading } = useLeagueSummary(
