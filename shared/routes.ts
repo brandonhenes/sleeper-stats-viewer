@@ -24,13 +24,14 @@ export const errorSchemas = {
 
 export const api = {
   sleeper: {
-    // GET /api/overview?username=...
+    // GET /api/overview?username=...&season=...
     // Returns cached data immediately with sync status flags
     overview: {
       method: 'GET' as const,
       path: '/api/overview',
       input: z.object({
-        username: z.string()
+        username: z.string(),
+        season: z.coerce.number().int().optional(),
       }),
       responses: {
         200: overviewResponseSchema,
@@ -83,13 +84,14 @@ export const api = {
       },
     },
 
-    // GET /api/group/:groupId/h2h?username=...
+    // GET /api/group/:groupId/h2h?username=...&season=...
     // Returns head-to-head records vs each opponent (on-demand, cached)
     h2h: {
       method: 'GET' as const,
       path: '/api/group/:groupId/h2h',
       input: z.object({
-        username: z.string()
+        username: z.string(),
+        season: z.coerce.number().int().optional(),
       }),
       responses: {
         200: h2hResponseSchema,

@@ -1,0 +1,466 @@
+Client (UI)
+
+Global season state
+
+client/src/hooks/useSeason.ts
+
+client/src/components/SeasonSelector.tsx
+
+Profile (tiles/grid)
+
+client/src/pages/Profile.tsx
+
+client/src/components/LeagueCard.tsx (tile UI)
+
+League chain details page
+
+client/src/pages/LeagueGroupDetails.tsx
+
+client/src/components/TeamsSection.tsx (team cards + roster/capital display)
+
+Data fetching
+
+client/src/hooks/use-sleeper.ts (React Query hooks)
+
+Server (API + caching)
+
+Main routes
+
+server/routes.ts
+
+Cache/DB access
+
+server/cache.ts
+
+server/db.ts
+
+Schema + API route definitions
+
+shared/schema.ts (Zod schemas + DB tables)
+
+shared/routes.ts (typed route definitions used by client)
+
+Current season ambiguity / “0-0 lies” (what’s wrong today)
+
+These are the spots that currently mislead users:
+
+Profile tile season mismatch
+Profile.tsx filters by selected season… but LeagueCard.tsx fetches summary for the latest league in the chain, not the selected season. So you can be “viewing 2024” while the tile shows 2025 results.
+
+LeagueGroupDetails season mismatch
+LeagueGroupDetails.tsx lets you pick a season (Season Results card), but other tabs still use latestLeagueId (teams, draft capital, etc.). So the page can show 2023 results while rendering 2025 rosters.
+
+“Current” trades mode ignores selected season
+Trades route picks maxSeason for the group, not ?season=. So “current” becomes “latest season always,” not “season you’re viewing.”
+
+H2H aggregates across all seasons always
+/api/group/:groupId/h2h currently aggregates every league in the group (all seasons). That’s great for “history,” wrong for “current season.”
+
+0–0 shown as if meaningful
+Your UI prints record/seed even when there are no games yet, creating that “0-0 but looks real” vibe.
+
+Data flow diagram (target)
+[URL ?season=YYYY] + [localStorage fallback]
+          |
+          v
+   Profile / Group page
+          |
+          v
+React Query hook (queryKey includes season)
+          |
+          v
+API routes (season-aware)
+   - /api/overview?username&season
+   - /api/group/:id/seasons?username&season
+   - /api/group/:id/trades?mode&season
+   - /api/group/:id/h2h?username&season
+          |
+          v
+DB/Cache (server/cache.ts) + Sleeper API fallback
+          |
+          v
+UI renders season-labeled metrics
+(no empty panels; tight empty states)
+
+The exact prompt to paste into Replit Agent
+
+Copy/paste this into the Replit Agent (and tell it not to refactor unrelated styling):
+
+You are implementing Phase 1 polish + season correctness for Sleeper Scout.
+
+High priority goals:
+1) Global Season Selector (single source of truth):
+   - Use URL query param ?season=YYYY as canonical.
+   - localStorage fallback only if URL param absent.
+   - Default to latest COMPLETED season when the newest season has no results (no games yet).
+   - Every React Query key that is season-sensitive must include season.
+   - Every page must display the season near the title to avoid ambiguity.
+
+2) League tiles: one tile per league chain (previous_league_id)
+   - Profile grid shows one tile per group_id (already grouped).
+   - Inside each tile add an inline season switcher (e.g. 2023 | 2024 | 2025 | 2026).
+   - Tile should default to global selectedSeason if available; else fall back to latest available season in that chain.
+
+3) Tiles must show “what happened”
+   - Finish: Champion/Runner-up/Finish N OR "In Season" + seed/rank when games exist
+   - Record + win% (only if games > 0)
+   - Points For
+   - Regular season rank (if available)
+   - If games = 0 and not complete, show: "No results yet" (do NOT display “0-0” as meaningful)
+
+4) No empty panels
+   - Hide tabs/sections that have no data.
+   - When a section is relevant but empty, show a tight empty state with one action:
+     “Sync”, “Change season”, or “Switch to last completed season”.
+
+5) Per-team card toggle: Roster ↔ Draft Capital (no scrolling to top)
+   - Remove global roster/capital toggle at top of TeamsSection.
+   - Add per-team mini-toggle inside each team card; persist view per team via localStorage.
+
+Implementation plan (change only these files unless required):
+- shared/schema.ts: extend overviewResponseSchema to include season_meta + latest_completed_season (optional fields).
+- shared/routes.ts: allow optional season in /api/overview and /api/group/:groupId/h2h input schema.
+- server/routes.ts:
+  - /api/overview: compute season_meta (games played by season) + latest_completed_season; return them.
+  - /api/group/:groupId/h2h: accept ?season=YYYY; if provided, only aggregate that season’s league(s).
+  - /api/group/:groupId/trades: accept ?season=YYYY; in mode=current use that season (else fallback to maxSeason).
+  - /api/group/:groupId/seasons: include league status + total_rosters in each season entry if easy (for better “In Season” messaging).
+- client/src/hooks/use-sleeper.ts:
+  - useSleeperOverview(username, season) with queryKey including season and request including season.
+  - useH2h(groupId, username, season) queryKey includes season and sends season param.
+  - useTrades(groupId, mode, season) queryKey includes season and sends season param.
+  - useSeasonSummaries queryKey includes season (even if response returns all seasons).
+- client/src/pages/Profile.tsx:
+  - Enforce global season: URL param first, localStorage fallback.
+  - If selected season has no results AND user did not explicitly set URL param, auto-switch to latest_completed_season and show banner:
+    “No results yet for {season} — viewing {latestCompleted} by default.”
+  - Pass selectedSeason into LeagueCard as defaultSeason.
+- client/src/components/LeagueCard.tsx:
+  - Stop using useLeagueSummary(latestLeagueId) for display.
+  - Use useSeasonSummaries(group_id, username) and render metrics for tileSeason.
+  - Add inline season switcher per tile; persist per group in localStorage.
+  - Link to /group/:groupId must include &season=tileSeason.
+- client/src/pages/LeagueGroupDetails.tsx:
+  - Use global selectedSeason (URL param) for the page.
+  - Derive activeLeagueId from season summaries for selectedSeason; use activeLeagueId everywhere (Teams, Draft capital, etc.).
+  - Trades/H2H in current mode must be season-filtered.
+  - Hide tabs if empty; show concise empty states with next action.
+- client/src/components/TeamsSection.tsx:
+  - Add per-team Roster/Draft/Both toggle within each team card.
+  - Persist per team in localStorage; no scroll jump.
+
+After changes:
+- Run TypeScript build, ensure no schema parse failures.
+- Verify profile tiles show correct season metrics and no duplicates.
+- Verify early season doesn’t show misleading 0-0.
+
+Exact code changes (diff-style snippets)
+1) shared/schema.ts — extend overview response (so client can read season meta)
+ export const overviewResponseSchema = z.object({
+   user: sleeperUserSchema,
+   league_groups: z.array(leagueGroupSchema),
+   cached: z.boolean().optional(),
+   needs_sync: z.boolean().optional(),
+   sync_status: z.enum(["not_started", "running", "done", "error"]).optional(),
+   lastSyncedAt: z.number().optional(),
++  // season correctness helpers
++  season_meta: z.array(z.object({
++    season: z.number(),
++    leagues: z.number(),
++    games_played: z.number(),
++    completed_leagues: z.number(),
++    has_results: z.boolean(),
++  })).optional(),
++  latest_completed_season: z.number().nullable().optional(),
+ });
+
+2) shared/routes.ts — allow optional season query param on overview + h2h
+ overview: {
+   method: 'GET' as const,
+   path: '/api/overview',
+   input: z.object({
+-    username: z.string()
++    username: z.string(),
++    season: z.coerce.number().int().optional(),
+   }),
+   responses: { ... }
+ },
+
+ h2h: {
+   method: 'GET' as const,
+   path: '/api/group/:groupId/h2h',
+   input: z.object({
+-    username: z.string()
++    username: z.string(),
++    season: z.coerce.number().int().optional(),
+   }),
+   responses: { ... }
+ },
+
+3) server/routes.ts — add season meta to overview + filter h2h + filter trades
+3a) Overview: compute season_meta + latest_completed_season
+ app.get(api.sleeper.overview.path, async (req, res) => {
+   try {
+-    const { username } = api.sleeper.overview.input.parse(req.query);
++    const { username } = api.sleeper.overview.input.parse(req.query);
+     const dbAvailable = cache.isDbAvailable();
+     ...
+     if (cachedUser) {
+       const leagueGroups = await buildLeagueGroups(cachedUser.user_id);
+       const lastSync = await cache.getLastSyncTime(cachedUser.user_id);
+       const isStale = await cache.isDataStale(cachedUser.user_id);
+
++      // season meta: detect “no results yet” seasons
++      const leagues = await cache.getLeaguesForUser(cachedUser.user_id);
++      const rosters = await cache.getRostersForUser(cachedUser.user_id);
++      const rosterByLeague = new Map(rosters.map(r => [r.league_id, r]));
++      const meta = new Map<number, { leagues: number; games: number; completed: number }>();
++      for (const lg of leagues) {
++        const s = lg.season ?? 0;
++        if (!s) continue;
++        const r = rosterByLeague.get(lg.league_id);
++        const games = (r?.settings?.wins ?? r?.wins ?? 0) + (r?.settings?.losses ?? r?.losses ?? 0) + (r?.settings?.ties ?? r?.ties ?? 0);
++        const cur = meta.get(s) ?? { leagues: 0, games: 0, completed: 0 };
++        cur.leagues += 1;
++        cur.games += games;
++        if (lg.status === "complete") cur.completed += 1;
++        meta.set(s, cur);
++      }
++      const season_meta = Array.from(meta.entries())
++        .map(([season, m]) => ({
++          season,
++          leagues: m.leagues,
++          games_played: m.games,
++          completed_leagues: m.completed,
++          has_results: m.games > 0,
++        }))
++        .sort((a,b) => b.season - a.season);
++      const latest_completed_season =
++        season_meta.find(x => x.completed_leagues > 0)?.season ?? null;
+
+       return res.json({
+         user: { ... },
+         league_groups: leagueGroups,
+         cached: true,
+         needs_sync: isStale,
+         sync_status: syncStatus,
+         lastSyncedAt: lastSync || undefined,
++        season_meta,
++        latest_completed_season,
+       });
+     }
+
+3b) H2H: filter by ?season= when provided
+ app.get(api.sleeper.h2h.path, async (req, res) => {
+   try {
+     const { groupId } = req.params;
+-    const { username } = api.sleeper.h2h.input.parse(req.query);
++    const { username, season } = api.sleeper.h2h.input.parse(req.query);
+
+     const cachedUser = await cache.getUserByUsername(username);
+     ...
+-    const leagues = await cache.getLeaguesByGroupId(groupId, userId);
++    let leagues = await cache.getLeaguesByGroupId(groupId, userId);
++    if (season) leagues = leagues.filter(l => l.season === season);
+
+-    if (leagues.length === 0) {
+-      return res.status(404).json({ message: "League group not found" });
+-    }
++    if (leagues.length === 0) {
++      return res.json({
++        group_id: groupId,
++        my_owner_id: userId,
++        opponents: [],
++        h2h_overall: { wins: 0, losses: 0, ties: 0, pf: 0, pa: 0, games: 0 },
++      });
++    }
+
+3c) Trades: in mode=current, prefer ?season=YYYY
+ app.get(api.sleeper.trades.path, async (req, res) => {
+   try {
+     const { groupId } = req.params;
+-    const { username, mode } = req.query;
++    const { username, mode, season } = req.query;
+     const viewMode = mode === "history" ? "history" : "current";
+     ...
+-    // Filter to latest season if mode is "current"
++    // Filter to season if provided, else latest season if mode is "current"
+     let filteredLeagueIds = groupLeagueIds;
+     if (viewMode === "current" && maxSeason > 0) {
++      const targetSeason = (typeof season === "string" && season) ? Number(season) : maxSeason;
+       filteredLeagueIds = [];
+       for (const lid of groupLeagueIds) {
+         const league = await cache.getLeagueById(lid);
+-        if (league?.season === maxSeason) {
++        if (league?.season === targetSeason) {
+           filteredLeagueIds.push(lid);
+         }
+       }
+     }
+
+4) client/src/hooks/use-sleeper.ts — season in query keys + URLs
+-export function useSleeperOverview(username: string | undefined) {
++export function useSleeperOverview(username: string | undefined, season?: number) {
+   return useQuery({
+-    queryKey: [api.sleeper.overview.path, username],
++    queryKey: [api.sleeper.overview.path, username, season ?? "auto"],
+     queryFn: async () => {
+       if (!username) return null;
+-      const url = `${api.sleeper.overview.path}?username=${encodeURIComponent(username)}`;
++      const url =
++        `${api.sleeper.overview.path}?username=${encodeURIComponent(username)}`
++        + (season ? `&season=${encodeURIComponent(String(season))}` : "");
+       const res = await fetch(url);
+       ...
+     },
+
+-export function useH2h(groupId: string | undefined, username: string | undefined) {
++export function useH2h(groupId: string | undefined, username: string | undefined, season?: number) {
+   return useQuery({
+-    queryKey: [api.sleeper.h2h.path, groupId, username],
++    queryKey: [api.sleeper.h2h.path, groupId, username, season ?? "all"],
+     queryFn: async () => {
+       if (!groupId || !username) return null;
+-      const url = `${buildUrl(api.sleeper.h2h.path, { groupId })}?username=${encodeURIComponent(username)}`;
++      const url =
++        `${buildUrl(api.sleeper.h2h.path, { groupId })}?username=${encodeURIComponent(username)}`
++        + (season ? `&season=${encodeURIComponent(String(season))}` : "");
+       ...
+     },
+
+-export function useTrades(groupId: string | undefined, mode: "current" | "history" = "current") {
++export function useTrades(groupId: string | undefined, mode: "current" | "history" = "current", season?: number) {
+   return useQuery({
+-    queryKey: [api.sleeper.trades.path, groupId, mode],
++    queryKey: [api.sleeper.trades.path, groupId, mode, season ?? "auto"],
+     queryFn: async () => {
+       if (!groupId) return null;
+-      const url = `${buildUrl(api.sleeper.trades.path, { groupId })}?mode=${mode}`;
++      const url =
++        `${buildUrl(api.sleeper.trades.path, { groupId })}?mode=${mode}`
++        + (season ? `&season=${encodeURIComponent(String(season))}` : "");
+       ...
+     },
+
+ export function useSeasonSummaries(groupId: string | undefined, username: string | undefined) {
+   return useQuery<SeasonSummariesResponse>({
+-    queryKey: ["/api/group", groupId, "seasons", username],
++    queryKey: ["/api/group", groupId, "seasons", username, "v1"],
+
+5) client/src/pages/Profile.tsx — enforce default-to-last-completed when newest has no results
+
+Add an effect after overview loads:
+
+ const { data: overviewData, isLoading, error } = useSleeperOverview(username);
+ ...
+ const { selectedSeason, setSeason } = useSeason(availableSeasons, latestSeason);
+
++// If season has no results yet, auto-fallback unless URL explicitly pins it.
++useEffect(() => {
++  if (!overviewData?.season_meta || !overviewData.latest_completed_season) return;
++  const params = new URLSearchParams(window.location.search);
++  const explicit = params.has("season");
++  if (explicit) return;
++
++  const meta = overviewData.season_meta.find(m => m.season === selectedSeason);
++  if (!meta) return;
++  const isEmpty = meta.has_results === false && meta.completed_leagues === 0;
++  if (isEmpty) setSeason(overviewData.latest_completed_season);
++}, [overviewData, selectedSeason, setSeason]);
+
+
+Also: pass selectedSeason into LeagueCard as defaultSeason, and include season in the group link.
+
+6) client/src/components/LeagueCard.tsx — render “what happened” from season summaries + tile season switcher
+
+Key concept: stop using the “latest league summary”; instead use useSeasonSummaries(groupId, username).
+
+You’ll implement:
+
+tileSeason state (default = global selectedSeason)
+
+inline season buttons
+
+finish/record/win% only when games > 0
+
+“No results yet” when games = 0
+
+(Agent should implement this directly; it’s a medium edit, not a 5-line patch.)
+
+7) client/src/pages/LeagueGroupDetails.tsx — activeLeagueId must follow selected season
+
+Core change:
+
+ const { data: seasonData } = useSeasonSummaries(groupId, username);
+ ...
+-const latestLeagueId = groupDetails?.league_ids?.[0];
++const activeSeason = selectedSeason;
++const activeLeagueId =
++  seasonData?.seasons?.find(s => s.season === activeSeason)?.league_id
++  ?? groupDetails?.league_ids?.[0];
+
+-const { data: draftCapitalData } = useAllDraftCapital(latestLeagueId);
++const { data: draftCapitalData } = useAllDraftCapital(activeLeagueId);
+
+-const { data: teamsData } = useLeagueTeams(latestLeagueId);
++const { data: teamsData } = useLeagueTeams(activeLeagueId);
+
+-const { data: tradesData } = useTrades(groupId, viewMode);
++const { data: tradesData } = useTrades(groupId, viewMode, viewMode === "current" ? activeSeason : undefined);
+
+-const { data: h2hData } = useH2h(groupId, username);
++const { data: h2hData } = useH2h(groupId, username, viewMode === "current" ? activeSeason : undefined);
+
+
+Then: hide tabs if empty (opponents/trades).
+
+8) client/src/components/TeamsSection.tsx — per-team toggle (Roster / Draft / Both)
+
+Remove the global showCapital toggle and replace with per-team state stored in localStorage keyed by leagueId + roster_id.
+
+The agent should:
+
+render a 3-button mini toggle inside each team card header
+
+default to "roster"
+
+if draft capital missing for that team, hide draft buttons and force "roster"
+
+Acceptance criteria checklist (production sanity)
+Global season correctness
+
+ Loading /profile/henes35 sets a clear season label near the title (“Season 2025”).
+
+ If newest season has 0 games across leagues, app auto-switches to latest_completed_season unless URL explicitly pins ?season=YYYY.
+
+ Season persists via URL; localStorage only used when URL param absent.
+
+ React Query keys include season for season-sensitive calls.
+
+League tiles
+
+ Exactly one tile per league chain (group_id).
+
+ Tile shows finish OR in-season seed/rank when games exist.
+
+ Tile does not show “0-0” as if meaningful; shows “No results yet” when appropriate.
+
+ Tile has an inline season switcher for that chain.
+
+ Clicking tile preserves season in URL to details page.
+
+League chain details page
+
+ Selected season drives everything (teams, draft capital, trades, h2h).
+
+ Trades/H2H in “current” mode are filtered to selected season (no cross-season bleed).
+
+ Empty sections are hidden; empty states have one clear action.
+
+Team cards
+
+ Each team card has its own Roster/Draft/Both toggle.
+
+ Toggling a team doesn’t scroll you to top.
+
+ Toggle state persists per team.

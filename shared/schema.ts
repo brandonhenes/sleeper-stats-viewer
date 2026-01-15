@@ -293,6 +293,14 @@ export const syncStatusSchema = z.object({
 });
 
 // Updated overview response with league groups
+export const seasonMetaSchema = z.object({
+  season: z.number(),
+  leagues: z.number(),
+  games_played: z.number(),
+  completed_leagues: z.number(),
+  has_results: z.boolean(),
+});
+
 export const overviewResponseSchema = z.object({
   user: sleeperUserSchema,
   league_groups: z.array(leagueGroupSchema),
@@ -300,6 +308,8 @@ export const overviewResponseSchema = z.object({
   needs_sync: z.boolean().optional(),
   sync_status: z.enum(["not_started", "running", "done", "error"]).optional(),
   lastSyncedAt: z.number().optional(),
+  season_meta: z.array(seasonMetaSchema).optional(),
+  latest_completed_season: z.number().nullable().optional(),
 });
 
 export const leagueDetailsResponseSchema = z.object({
