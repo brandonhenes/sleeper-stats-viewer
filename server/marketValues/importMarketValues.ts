@@ -62,7 +62,7 @@ function parseFPCsv(content: string): FPRanking[] {
     trim: true,
     relax_quotes: true,
     relax_column_count: true,
-  });
+  }) as Record<string, string>[];
   
   const results: FPRanking[] = [];
   
@@ -104,21 +104,22 @@ function parseTradeValuesCsv(content: string): TradeValue[] {
     trim: true,
     relax_quotes: true,
     relax_column_count: true,
-  });
+  }) as Record<string, string>[];
   
   const results: TradeValue[] = [];
   
   for (const row of records) {
-    const nameKey = Object.keys(row).find(k => 
+    const keys = Object.keys(row);
+    const nameKey = keys.find(k => 
       k.toLowerCase().includes("name") || k.toLowerCase().includes("player")
-    ) || Object.keys(row)[0];
-    const teamKey = Object.keys(row).find(k => k.toLowerCase().includes("team")) || Object.keys(row)[1];
-    const posKey = Object.keys(row).find(k => k.toLowerCase().includes("pos")) || Object.keys(row)[2];
-    const valueKey = Object.keys(row).find(k => 
+    ) || keys[0];
+    const teamKey = keys.find(k => k.toLowerCase().includes("team")) || keys[1];
+    const posKey = keys.find(k => k.toLowerCase().includes("pos")) || keys[2];
+    const valueKey = keys.find(k => 
       k.toLowerCase().includes("value") || k.toLowerCase().includes("trade")
-    ) || Object.keys(row)[3];
-    const sfTepKey = Object.keys(row)[4];
-    const changeKey = Object.keys(row).find(k => k.toLowerCase().includes("change")) || Object.keys(row)[5];
+    ) || keys[3];
+    const sfTepKey = keys[4];
+    const changeKey = keys.find(k => k.toLowerCase().includes("change")) || keys[5];
     
     const name = String(row[nameKey] || "").trim();
     const team = String(row[teamKey] || "").trim();
@@ -145,8 +146,8 @@ function parseTradeValuesCsv(content: string): TradeValue[] {
 }
 
 export async function importMarketValues(asOfYear: number): Promise<ImportResult> {
-  const fpPath = path.join(process.cwd(), "attached_assets", "FantasyPros_2025_Dynasty_OP_Rankings_1768449572023.csv");
-  const tradePath = path.join(process.cwd(), "attached_assets", "DynastyTradeValues_Jan2026.csv_-_Sheet1_1768449572023.csv");
+  const fpPath = path.join(process.cwd(), "attached_assets", "FantasyPros_2025_Dynasty_OP_Rankings_1768451262925.csv");
+  const tradePath = path.join(process.cwd(), "attached_assets", "DynastyTradeValues_Jan2026.csv_-_Sheet1_1768451262925.csv");
   
   let fpContent = "";
   let tradeContent = "";
