@@ -79,6 +79,33 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 15, 2026 (FantasyPros Market Values Integration)
+**Database & Schema**:
+- Added `player_market_values` table for storing FP rankings and dynasty trade values
+- Added `player_aliases` table for mapping alternate player names to Sleeper IDs
+- Both tables support season-aware data via `as_of_year` field
+
+**Import System**:
+- Created `server/marketValues/importMarketValues.ts` module for parsing FantasyPros CSV data
+- Importer matches players via normalized names and manual aliases
+- Supports FP dynasty rankings (rank, tier, best/worst/avg) and trade values (standard/superflex/TEP)
+
+**API Endpoints**:
+- `GET /api/market-values?ids=id1,id2&asOf=2025&sf=false&tep=false`: Get market values for players
+- `POST /api/debug/import-market-values`: Import market values from CSV (dev only)
+
+**UI Integration**:
+- TeamsSection displays FP Rank and Trade Value badges on player cards
+- Sort toggle allows switching between Rank and Value sorting modes
+- Season-aware: uses displayedSeason prop from LeagueGroupDetails
+
+**Files**:
+- `shared/schema.ts`: playerMarketValues, playerAliases tables and types
+- `server/cache.ts`: getPlayerAliases, upsertMarketValue, getMarketValuesByIds helpers
+- `server/marketValues/importMarketValues.ts`: CSV import logic
+- `client/src/hooks/use-sleeper.ts`: useMarketValues hook
+- `client/src/components/TeamsSection.tsx`: Market value display and sorting
+
 ### January 15, 2026 (Season-Aware Navigation & Per-Team Toggles)
 **Season-Aware Data**:
 - Added `seasons_to_league` mapping to LeagueGroup schema (season→league_id array) for client-side season navigation
