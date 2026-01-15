@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useGroupTradeAssets, useNormalizeTrades, useLeagueTeams } from "@/hooks/use-sleeper";
-import { RefreshCw, User, Calendar, TrendingUp, TrendingDown, Filter } from "lucide-react";
+import { useGroupTradeAssets, useNormalizeTrades, useLeagueTeams, useMarketValues } from "@/hooks/use-sleeper";
+import { RefreshCw, User, Calendar, TrendingUp, TrendingDown, Filter, Hash, DollarSign } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface TradesSectionProps {
@@ -13,9 +13,12 @@ interface TradesSectionProps {
   leagueId?: string;
   username?: string;
   currentRosterId?: number;
+  season?: number;
+  isSuperflex?: boolean;
+  isTep?: boolean;
 }
 
-export function TradesSection({ groupId, leagueId, username, currentRosterId }: TradesSectionProps) {
+export function TradesSection({ groupId, leagueId, username, currentRosterId, season, isSuperflex = false, isTep = false }: TradesSectionProps) {
   const [seasonFilter, setSeasonFilter] = useState<number | 'all' | null>(null);
   const [filterRosterId, setFilterRosterId] = useState<number | undefined>(undefined);
   
@@ -31,6 +34,35 @@ export function TradesSection({ groupId, leagueId, username, currentRosterId }: 
       setSeasonFilter(data.latest_season);
     }
   }, [data?.latest_season, seasonFilter]);
+  
+  // Collect player IDs from trade assets for market values lookup
+  const allPlayerIds = useMemo(() => {
+    if (!data?.trades) return [];
+    const ids = new Set<string>();
+    for (const trade of data.trades) {
+      for (const asset of trade.assets) {
+        if (asset.asset_type === "player") {
+          ids.add(asset.asset_key);
+        }
+      }
+    }
+    return Array.from(ids);
+  }, [data?.trades]);
+  
+  // Fetch market values for traded players (use seasonFilter when a specific season is selected)
+  const effectiveSeason = typeof seasonFilter === 'number' ? seasonFilter : (season || new Date().getFullYear());
+  const { data: marketData } = useMarketValues(allPlayerIds, { asOf: effectiveSeason, sf: isSuperflex, tep: isTep });
+  
+  // Create a map for quick lookups
+  const marketValueMap = useMemo(() => {
+    if (!marketData?.values) return new Map<string, { fp_rank: number | null; trade_value: number | null }>();
+    return new Map(
+      marketData.values.map(v => [v.player_id, { 
+        fp_rank: v.fp_rank, 
+        trade_value: v.trade_value_effective 
+      }])
+    );
+  }, [marketData?.values]);
   
   if (!groupId || !leagueId) {
     return null;
@@ -181,6 +213,7 @@ export function TradesSection({ groupId, leagueId, username, currentRosterId }: 
                 currentRosterId={currentRosterId}
                 getTeamName={getTeamName}
                 formatDate={formatDate}
+                marketValueMap={marketValueMap}
               />
             ))}
           </div>
@@ -190,40 +223,47 @@ export function TradesSection({ groupId, leagueId, username, currentRosterId }: 
   );
 }
 
+interface TradeAsset {
+  roster_id: number;
+  direction: string;
+  asset_type: string;
+  asset_key: string;
+  asset_name: string | null;
+}
+
 interface TradeCardProps {
   trade: {
     trade_id: string;
     created_at_ms: number;
     season: number;
     participants: number[];
-    assets: Array<{
-      roster_id: number;
-      direction: string;
-      asset_type: string;
-      asset_key: string;
-      asset_name: string | null;
-    }>;
+    assets: TradeAsset[];
   };
   tradeIndex: number;
   currentRosterId?: number;
   getTeamName: (rosterId: number) => string;
   formatDate: (ms: number) => string;
+  marketValueMap: Map<string, { fp_rank: number | null; trade_value: number | null }>;
 }
 
-function TradeCard({ trade, tradeIndex, currentRosterId, getTeamName, formatDate }: TradeCardProps) {
-  const groupedByRoster = new Map<number, { received: string[]; sent: string[] }>();
+interface GroupedAssets {
+  received: TradeAsset[];
+  sent: TradeAsset[];
+}
+
+function TradeCard({ trade, tradeIndex, currentRosterId, getTeamName, formatDate, marketValueMap }: TradeCardProps) {
+  const groupedByRoster = new Map<number, GroupedAssets>();
 
   for (const asset of trade.assets) {
     if (!groupedByRoster.has(asset.roster_id)) {
       groupedByRoster.set(asset.roster_id, { received: [], sent: [] });
     }
     const group = groupedByRoster.get(asset.roster_id)!;
-    const displayName = asset.asset_name || (asset.asset_type === "pick" ? asset.asset_key : asset.asset_key);
     
     if (asset.direction === "received") {
-      group.received.push(displayName);
+      group.received.push(asset);
     } else {
-      group.sent.push(displayName);
+      group.sent.push(asset);
     }
   }
 
@@ -281,11 +321,20 @@ function TradeCard({ trade, tradeIndex, currentRosterId, getTeamName, formatDate
                   </div>
                   <div className="space-y-1">
                     {group.received.length > 0 ? (
-                      group.received.map((item, i) => (
-                        <div key={i} className="text-xs" data-testid={`text-received-${tradeIndex}-${rosterIndex}-${i}`}>
-                          {item}
-                        </div>
-                      ))
+                      group.received.map((asset, i) => {
+                        const displayName = asset.asset_name || asset.asset_key;
+                        const marketVal = asset.asset_type === "player" ? marketValueMap.get(asset.asset_key) : null;
+                        return (
+                          <div key={i} className="flex items-center gap-1 flex-wrap" data-testid={`text-received-${tradeIndex}-${rosterIndex}-${i}`}>
+                            <span className="text-xs">{displayName}</span>
+                            {marketVal?.trade_value != null && (
+                              <Badge variant="outline" className="text-[10px]">
+                                {marketVal.trade_value}
+                              </Badge>
+                            )}
+                          </div>
+                        );
+                      })
                     ) : (
                       <div className="text-xs text-muted-foreground">-</div>
                     )}
@@ -299,11 +348,20 @@ function TradeCard({ trade, tradeIndex, currentRosterId, getTeamName, formatDate
                   </div>
                   <div className="space-y-1">
                     {group.sent.length > 0 ? (
-                      group.sent.map((item, i) => (
-                        <div key={i} className="text-xs" data-testid={`text-sent-${tradeIndex}-${rosterIndex}-${i}`}>
-                          {item}
-                        </div>
-                      ))
+                      group.sent.map((asset, i) => {
+                        const displayName = asset.asset_name || asset.asset_key;
+                        const marketVal = asset.asset_type === "player" ? marketValueMap.get(asset.asset_key) : null;
+                        return (
+                          <div key={i} className="flex items-center gap-1 flex-wrap" data-testid={`text-sent-${tradeIndex}-${rosterIndex}-${i}`}>
+                            <span className="text-xs">{displayName}</span>
+                            {marketVal?.trade_value != null && (
+                              <Badge variant="outline" className="text-[10px]">
+                                {marketVal.trade_value}
+                              </Badge>
+                            )}
+                          </div>
+                        );
+                      })
                     ) : (
                       <div className="text-xs text-muted-foreground">-</div>
                     )}

@@ -79,16 +79,24 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
-### January 15, 2026 (FantasyPros Market Values Integration)
+### January 15, 2026 (FantasyPros Market Values Integration + Enhancements)
 **Database & Schema**:
 - Added `player_market_values` table for storing FP rankings and dynasty trade values
 - Added `player_aliases` table for mapping alternate player names to Sleeper IDs
 - Both tables support season-aware data via `as_of_year` field
+- Updated `leagueDetailsResponseSchema` with `is_superflex` and `is_tep` fields
 
 **Import System**:
 - Created `server/marketValues/importMarketValues.ts` module for parsing FantasyPros CSV data
+- **ENHANCED**: Uses csv-parse library for robust, production-grade CSV parsing with header mapping
 - Importer matches players via normalized names and manual aliases
 - Supports FP dynasty rankings (rank, tier, best/worst/avg) and trade values (standard/superflex/TEP)
+
+**League Format Detection**:
+- `/api/league/:leagueId` now returns `is_superflex` and `is_tep` flags
+- Superflex: detected from `roster_positions` containing "SUPER_FLEX"
+- TEP: detected from `scoring_settings.bonus_rec_te > 0` or `rec_te > rec`
+- LeagueGroupDetails passes format flags to TeamsSection and TradesSection
 
 **API Endpoints**:
 - `GET /api/market-values?ids=id1,id2&asOf=2025&sf=false&tep=false`: Get market values for players
@@ -97,14 +105,17 @@ Preferred communication style: Simple, everyday language.
 **UI Integration**:
 - TeamsSection displays FP Rank and Trade Value badges on player cards
 - Sort toggle allows switching between Rank and Value sorting modes
-- Season-aware: uses displayedSeason prop from LeagueGroupDetails
+- **NEW**: TradesSection displays trade values for traded players
+- Format-aware: sf/tep flags applied for accurate valuations
+- Season-aware: uses displayedSeason/seasonFilter for year-specific values
 
 **Files**:
 - `shared/schema.ts`: playerMarketValues, playerAliases tables and types
 - `server/cache.ts`: getPlayerAliases, upsertMarketValue, getMarketValuesByIds helpers
-- `server/marketValues/importMarketValues.ts`: CSV import logic
+- `server/marketValues/importMarketValues.ts`: CSV import logic (uses csv-parse)
 - `client/src/hooks/use-sleeper.ts`: useMarketValues hook
 - `client/src/components/TeamsSection.tsx`: Market value display and sorting
+- `client/src/components/TradesSection.tsx`: Trade values on traded players
 
 ### January 15, 2026 (Season-Aware Navigation & Per-Team Toggles)
 **Season-Aware Data**:
