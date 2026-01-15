@@ -918,6 +918,36 @@ export async function registerRoutes(
         const lastSync = await cache.getLastSyncTime(cachedUser.user_id);
         const isStale = await cache.isDataStale(cachedUser.user_id);
 
+        // Compute season_meta for season correctness
+        const userLeagues = await cache.getLeaguesForUser(cachedUser.user_id);
+        const userRosters = await cache.getRostersForUser(cachedUser.user_id);
+        const rosterByLeague = new Map(userRosters.map(r => [r.league_id, r]));
+        
+        const seasonMetaMap = new Map<number, { leagues: number; games: number; completed: number }>();
+        for (const lg of userLeagues) {
+          const s = lg.season ?? 0;
+          if (!s) continue;
+          const r = rosterByLeague.get(lg.league_id);
+          const games = (r?.wins ?? 0) + (r?.losses ?? 0) + (r?.ties ?? 0);
+          const cur = seasonMetaMap.get(s) ?? { leagues: 0, games: 0, completed: 0 };
+          cur.leagues += 1;
+          cur.games += games;
+          if (lg.status === "complete") cur.completed += 1;
+          seasonMetaMap.set(s, cur);
+        }
+        
+        const season_meta = Array.from(seasonMetaMap.entries())
+          .map(([season, m]) => ({
+            season,
+            leagues: m.leagues,
+            games_played: m.games,
+            completed_leagues: m.completed,
+            has_results: m.games > 0,
+          }))
+          .sort((a, b) => b.season - a.season);
+        
+        const latest_completed_season = season_meta.find(x => x.completed_leagues > 0)?.season ?? null;
+
         return res.json({
           user: {
             user_id: cachedUser.user_id,
@@ -930,6 +960,8 @@ export async function registerRoutes(
           needs_sync: isStale,
           sync_status: syncStatus,
           lastSyncedAt: lastSync || undefined,
+          season_meta,
+          latest_completed_season,
         });
       }
 
@@ -1211,7 +1243,7 @@ export async function registerRoutes(
   app.get(api.sleeper.h2h.path, async (req, res) => {
     try {
       const { groupId } = req.params;
-      const { username } = api.sleeper.h2h.input.parse(req.query);
+      const { username, season } = api.sleeper.h2h.input.parse(req.query);
 
       const cachedUser = await cache.getUserByUsername(username);
       if (!cachedUser) {
@@ -1219,10 +1251,21 @@ export async function registerRoutes(
       }
 
       const userId = cachedUser.user_id;
-      const leagues = await cache.getLeaguesByGroupId(groupId, userId);
+      let leagues = await cache.getLeaguesByGroupId(groupId, userId);
+      
+      // Filter by season if provided
+      if (season) {
+        leagues = leagues.filter(l => l.season === season);
+      }
 
       if (leagues.length === 0) {
-        return res.status(404).json({ message: "League group not found" });
+        // Return empty H2H instead of 404 when no matching leagues
+        return res.json({
+          group_id: groupId,
+          my_owner_id: userId,
+          opponents: [],
+          h2h_overall: { wins: 0, losses: 0, ties: 0, pf: 0, pa: 0, games: 0 },
+        });
       }
 
       // Aggregate H2H data across all leagues in group
@@ -1399,10 +1442,11 @@ export async function registerRoutes(
   // Optional query params: 
   //   username - filter to only trades involving this user
   //   mode - "current" (latest season only) or "history" (all seasons)
+  //   season - specific season to filter to (overrides mode logic when provided)
   app.get(api.sleeper.trades.path, async (req, res) => {
     try {
       const { groupId } = req.params;
-      const { username, mode } = req.query;
+      const { username, mode, season } = req.query;
       const viewMode = mode === "history" ? "history" : "current";
 
       // Get all leagues in this group
@@ -1420,13 +1464,15 @@ export async function registerRoutes(
         }
       }
       
-      // Filter to latest season if mode is "current"
+      // Filter by season: use explicit season param, else latest season if mode is "current"
       let filteredLeagueIds = groupLeagueIds;
-      if (viewMode === "current" && maxSeason > 0) {
+      const targetSeason = (typeof season === "string" && season) ? Number(season) : (viewMode === "current" ? maxSeason : 0);
+      
+      if (targetSeason > 0) {
         filteredLeagueIds = [];
         for (const lid of groupLeagueIds) {
           const league = await cache.getLeagueById(lid);
-          if (league?.season === maxSeason) {
+          if (league?.season === targetSeason) {
             filteredLeagueIds.push(lid);
           }
         }
