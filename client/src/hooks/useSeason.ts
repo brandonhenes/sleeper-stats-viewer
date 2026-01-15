@@ -14,7 +14,7 @@ function setSearchParam(key: string, value: string) {
   window.history.replaceState({}, "", newUrl);
 }
 
-export function useSeason(availableSeasons?: number[]) {
+export function useSeason(availableSeasons?: number[], preferredDefault?: number | null) {
   const [location] = useLocation();
   
   const seasons = useMemo(() => {
@@ -35,17 +35,20 @@ export function useSeason(availableSeasons?: number[]) {
     return undefined;
   });
 
-  // Validate season against available seasons - reset to default if invalid
+  // Validate season against available seasons - reset to preferred default or most recent if invalid
   useEffect(() => {
     if (seasons.length === 0) return;
     
     if (season === undefined || !seasons.includes(season)) {
-      const defaultSeason = seasons[0];
+      // Use preferredDefault if valid and available, otherwise use most recent
+      const defaultSeason = (preferredDefault && seasons.includes(preferredDefault)) 
+        ? preferredDefault 
+        : seasons[0];
       setSeasonState(defaultSeason);
       localStorage.setItem(LS_KEY, String(defaultSeason));
       setSearchParam("season", String(defaultSeason));
     }
-  }, [season, seasons]);
+  }, [season, seasons, preferredDefault]);
 
   useEffect(() => {
     const currentUrlSeason = getSearchParams().get("season");

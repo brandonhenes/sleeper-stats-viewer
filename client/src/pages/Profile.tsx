@@ -104,8 +104,11 @@ export default function Profile() {
     });
     return Array.from(seasons).sort((a, b) => b - a);
   }, [allLeagueGroups]);
+  
+  // Use server's latest_completed_season as default for smart fallback
+  const latestCompletedSeason = (data as any)?.latest_completed_season ?? null;
 
-  const { season, setSeason, seasons } = useSeason(availableSeasons);
+  const { season, setSeason, seasons } = useSeason(availableSeasons, latestCompletedSeason);
 
   // Split into active vs history groups based on is_active flag
   const activeGroups = allLeagueGroups.filter(g => g.is_active !== false);
