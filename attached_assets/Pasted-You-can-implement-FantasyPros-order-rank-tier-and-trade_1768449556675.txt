@@ -1,0 +1,326 @@
+You can implement FantasyPros “order” (rank/tier) and trade values together by treating them as two signals on the same player, stored under the same player_id, then exposing a tiny “value engine” that picks the right number (1QB vs SF vs TEP) at runtime.
+
+The key is: everything must map to Sleeper’s player_id. Once you’ve got that, the rest is just plumbing.
+
+The clean mental model
+What you have
+
+FantasyPros CSV → gives you ordering + tiers (rank is great for “who’s ahead of who?”)
+
+Trade value CSV → gives you math for trades (how much is a deal “worth?”), with an alternate column that is:
+
+SF (Superflex) for QBs
+
+TEP (Tight End Premium) for TEs
+
+N/A for RB/WR
+
+What you want in the app
+
+For every player card / roster / trade:
+
+Show: FP Rank, FP Tier, Trade Value (effective)
+
+Allow sorting:
+
+Sort by Rank (order)
+
+Sort by Trade Value (math)
+
+For trades:
+
+Sum values for assets on each side → show net
+
+DB shape: one table that holds both signals
+
+Add a table keyed by (player_id, as_of_year):
+
+shared/schema.ts (diff-style)
++ export const playerMarketValues = pgTable(
++   "player_market_values",
++   {
++     player_id: text("player_id").notNull(),
++     as_of_year: integer("as_of_year").notNull(),
++
++     // FantasyPros (order signal)
++     fp_rank: integer("fp_rank"),
++     fp_tier: integer("fp_tier"),
++
++     // Trade values (math signal)
++     trade_value_std: real("trade_value_std"), // 1QB / non-TEP baseline
++     trade_value_sf: real("trade_value_sf"),   // only meaningful for QBs
++     trade_value_tep: real("trade_value_tep"), // only meaningful for TEs
++     trade_value_change: text("trade_value_change"),
++
++     // Debug + provenance
++     sources_json: jsonb("sources_json").$type<Record<string, any>>().default({}),
++     updated_at: bigint("updated_at", { mode: "number" }).notNull(),
++   },
++   (t) => [
++     primaryKey({ columns: [t.player_id, t.as_of_year] }),
++     index("idx_market_values_year").on(t.as_of_year),
++   ],
++ );
++
++ // Optional but HIGHLY recommended: manual overrides for name mismatches
++ export const playerAliases = pgTable("player_aliases", {
++   alias: text("alias").primaryKey().notNull(), // normalized name + pos (or just name)
++   player_id: text("player_id").notNull(),
++   note: text("note"),
++ });
+
+
+Why this design works:
+
+One row per player per “value season” (2025, 2026…)
+
+Stores both signals
+
+You can swap datasets later without rewriting the UI
+
+After this: run npm run db:push.
+
+Import pipeline: parse both CSVs, map to player_id, upsert
+
+Create a single importer module that loads:
+
+data/FantasyPros_2025_Dynasty_OP_Rankings.csv
+
+data/TradeValues_2025.csv (your pasted format)
+
+New file: server/marketValues/importMarketValues.ts
+
+Core responsibilities:
+
+Parse CSV (skip section header lines like “Quarterbacks (QB)”)
+
+Normalize names so “C.J. Stroud” matches “CJ Stroud”
+
+Resolve to Sleeper player_id using players_master
+
+Upsert into player_market_values
+
+Emit unmatched report so you can patch with player_aliases
+
+Implementation details that matter (because your trade-values file is messy)
+
+Skip rows that don’t have the exact header columns
+
+Treat "N/A", "-", "New" as non-numeric
+
+Convert unicode minus − to regular -
+
+Example parsing helpers (drop-in):
+
+function normName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseNum(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (!s || s === "N/A" || s === "-" || s === "New") return null;
+  const cleaned = s.replace(/[−–]/g, "-").replace(/[^0-9.\-]/g, "");
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+
+Trade-values mapping rule (this is the “both at once” trick):
+
+trade_value_std = Trade Value
+
+if Position === QB then trade_value_sf = SF or TEP Value
+
+if Position === TE then trade_value_tep = SF or TEP Value
+
+Everything else keeps only trade_value_std.
+
+The “value engine”: pick the correct trade number at runtime
+
+Add a small function to compute effective trade value based on league format:
+
+function effectiveTradeValue(row: {
+  position?: string | null;
+  trade_value_std?: number | null;
+  trade_value_sf?: number | null;
+  trade_value_tep?: number | null;
+}, opts: { superflex: boolean; tep: boolean }): number | null {
+  const base = row.trade_value_std ?? null;
+  const pos = row.position ?? null;
+  if (!base && base !== 0) return null;
+
+  if (opts.superflex && pos === "QB" && row.trade_value_sf != null) return row.trade_value_sf;
+  if (opts.tep && pos === "TE" && row.trade_value_tep != null) return row.trade_value_tep;
+  return base;
+}
+
+
+This lets you support:
+
+1QB (std)
+
+SF (QB uses SF column)
+
+TEP (TE uses TEP column)
+
+SF+TEP (QB uses SF, TE uses TEP)
+
+No guessing, no blending required.
+
+API: fetch values for the exact players you’re rendering
+
+Add an endpoint so the UI can request values for the players it currently displays.
+
+server/routes.ts (new endpoint)
++ // GET /api/market-values?ids=...&asOf=2025&sf=1&tep=0
++ app.get("/api/market-values", async (req, res) => {
++   const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
++   const ids = idsParam.split(",").map(s => s.trim()).filter(Boolean);
++   const asOf = Number(req.query.asOf || 2025);
++   const sf = String(req.query.sf || "0") === "1";
++   const tep = String(req.query.tep || "0") === "1";
++
++   if (ids.length === 0) return res.json({ as_of_year: asOf, values: [] });
++
++   const rows = await cache.getMarketValuesByIds(ids, asOf); // you add this
++   const out = rows.map(r => ({
++     player_id: r.player_id,
++     fp_rank: r.fp_rank,
++     fp_tier: r.fp_tier,
++     trade_value_std: r.trade_value_std,
++     trade_value_effective: effectiveTradeValue(
++       { position: r.position, trade_value_std: r.trade_value_std, trade_value_sf: r.trade_value_sf, trade_value_tep: r.trade_value_tep },
++       { superflex: sf, tep }
++     ),
++   }));
++
++   res.json({ as_of_year: asOf, values: out });
++ });
+
+server/cache.ts (add query)
+
+Implement getMarketValuesByIds(ids, asOfYear) using drizzle inArray.
+
+UI usage: “order + trade values” simultaneously
+What changes in the UI
+
+On roster/team cards:
+
+show FP Rank (order)
+
+show Trade Value (effective)
+
+add a sort toggle: Rank | Value
+
+On trade pages:
+
+sum effective values for each side
+
+show net
+
+Client hook (add to client/src/hooks/use-sleeper.ts)
+export function useMarketValues(playerIds: string[], opts: { asOf: number; sf: boolean; tep: boolean }) {
+  return useQuery({
+    queryKey: ["/api/market-values", opts.asOf, opts.sf, opts.tep, playerIds.join(",")],
+    queryFn: async () => {
+      const url = `/api/market-values?asOf=${opts.asOf}&sf=${opts.sf ? 1 : 0}&tep=${opts.tep ? 1 : 0}&ids=${encodeURIComponent(playerIds.join(","))}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch market values");
+      return res.json();
+    },
+    enabled: playerIds.length > 0,
+    staleTime: 1000 * 60 * 60,
+  });
+}
+
+
+Then build a map in the component:
+
+const valueMap = new Map(values.values.map(v => [v.player_id, v]));
+
+
+Sorting example:
+
+by rank ascending when exists
+
+fallback to trade value desc
+
+How I’d tell the Replit Agent to implement it (copy/paste)
+
+Paste this as a single instruction to the agent:
+
+Implement unified player market values (FantasyPros rank/tier + trade values with SF/TEP variants) keyed by Sleeper player_id.
+
+Add DB tables in shared/schema.ts:
+
+player_market_values with PK (player_id, as_of_year) and columns: fp_rank, fp_tier, trade_value_std, trade_value_sf, trade_value_tep, trade_value_change, sources_json, updated_at.
+
+player_aliases for manual name-to-player_id overrides.
+Run npm run db:push.
+
+Create importer: server/marketValues/importMarketValues.ts
+
+Read data/FantasyPros_2025_Dynasty_OP_Rankings.csv and data/TradeValues_2025.csv from repo.
+
+Parse CSV robustly (skip section headings like “Quarterbacks (QB)”).
+
+Normalize names (strip punctuation/suffixes) and map to Sleeper player_id using players_master (and player_aliases overrides).
+
+Upsert into player_market_values.
+
+Return counts + list of unmatched rows for debugging.
+
+Add cache helpers in server/cache.ts:
+
+upsertMarketValues(rows)
+
+getMarketValuesByIds(ids, asOfYear)
+
+Add endpoint in server/routes.ts:
+
+GET /api/market-values?ids=...&asOf=2025&sf=1&tep=0
+
+Return fp_rank/fp_tier + trade_value_effective (QB uses SF column if sf=1; TE uses TEP column if tep=1; else std).
+
+Add client hook useMarketValues in client/src/hooks/use-sleeper.ts and update roster/trade UIs to display FP Rank + Trade Value, plus sorting toggle (Rank | Value).
+
+Add an admin/dev route POST /api/debug/import-market-values?asOf=2025 that runs the importer and returns counts + unmatched list.
+
+Acceptance criteria (production sanity checks)
+Import correctness
+
+✅ Import endpoint returns counts: { fp_rows, trade_rows, upserted_players, unmatched }
+
+✅ Unmatched list is non-zero but explainable (DST/K, “All Other QBs”, weird rookies), and can be fixed via player_aliases
+
+✅ Re-import is idempotent (running twice doesn’t duplicate)
+
+API correctness
+
+✅ GET /api/market-values returns values for a list of Sleeper player_ids
+
+✅ sf=1 changes QB values (uses trade_value_sf)
+
+✅ tep=1 changes TE values (uses trade_value_tep)
+
+✅ RB/WR unaffected by sf/tep (uses std)
+
+UI correctness
+
+✅ Player cards show both FP Rank and Trade Value (no ambiguity)
+
+✅ Sort toggle works without scroll jumps
+
+✅ Trade totals compute using effective value (format-aware)
+
+“Don’t lie” rule
+
+✅ If a player has no value match, UI shows a tight placeholder like “No value mapping” (not 0)

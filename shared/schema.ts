@@ -156,6 +156,30 @@ export const players_master = pgTable("players_master", {
   updated_at: bigint("updated_at", { mode: "number" }).notNull(),
 });
 
+// Player market values: FantasyPros rankings + dynasty trade values
+export const player_market_values = pgTable("player_market_values", {
+  player_id: text("player_id").notNull(),
+  as_of_year: integer("as_of_year").notNull(),
+  fp_rank: integer("fp_rank"),
+  fp_tier: integer("fp_tier"),
+  trade_value_std: real("trade_value_std"),
+  trade_value_sf: real("trade_value_sf"),
+  trade_value_tep: real("trade_value_tep"),
+  trade_value_change: text("trade_value_change"),
+  sources_json: jsonb("sources_json").$type<Record<string, unknown>>().default({}),
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.player_id, table.as_of_year] }),
+  index("idx_market_values_year").on(table.as_of_year),
+]);
+
+// Player aliases for manual name-to-player_id overrides
+export const player_aliases = pgTable("player_aliases", {
+  alias: text("alias").primaryKey().notNull(),
+  player_id: text("player_id").notNull(),
+  note: text("note"),
+});
+
 // User exposure summary for trade targeting
 // Caches each user's player exposure across their active leagues
 export const user_exposure_summary = pgTable("user_exposure_summary", {
