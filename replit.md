@@ -79,6 +79,22 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 15, 2026 (Season-Aware Navigation & Per-Team Toggles)
+**Season-Aware Data**:
+- Added `seasons_to_league` mapping to LeagueGroup schema (season→league_id array) for client-side season navigation
+- Profile.tsx and LeagueCard.tsx now use selected season to fetch season-specific data
+- LeagueGroupDetails.tsx computes `activeLeagueId` from seasons_to_league mapping based on selected season
+- All data hooks (draft capital, churn, trade timing, all-play, H2H, trades) now season-aware
+- H2H and trades hooks accept optional `season` parameter for filtering
+
+**Per-Team Toggles**:
+- TeamsSection.tsx now supports per-team Roster/Draft Capital toggle buttons
+- Each expanded team card has individual toggle to switch between roster view and draft capital view
+- Global toggle resets all per-team overrides when changed
+
+**Fallback Improvements**:
+- LeagueCard.tsx activeLeagueId falls back to last league_ids element if latest_league_id undefined
+
 ### January 12, 2026 (League Summary Tile Fixes)
 **Bug Fixes**:
 - Fixed points-for/against calculation with proper Number() parsing and operator precedence
