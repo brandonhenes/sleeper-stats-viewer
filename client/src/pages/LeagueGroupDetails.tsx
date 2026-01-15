@@ -648,7 +648,7 @@ export default function LeagueGroupDetails() {
 
               {/* TEAMS TAB */}
               <TabsContent value="teams" className="mt-6">
-                <TeamsSection leagueId={activeLeagueId} username={username} />
+                <TeamsSection leagueId={activeLeagueId} username={username} season={displayedSeason ?? undefined} />
               </TabsContent>
 
               {/* TRADES TAB */}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,13 +15,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Users, ChevronDown, ChevronRight, Layers } from "lucide-react";
-import { useLeagueTeams, useAllDraftCapital } from "@/hooks/use-sleeper";
+import { Loader2, Users, ChevronDown, ChevronRight, Layers, ArrowUpDown, TrendingUp, Hash } from "lucide-react";
+import { useLeagueTeams, useAllDraftCapital, useMarketValues } from "@/hooks/use-sleeper";
 import { motion } from "framer-motion";
 
 interface TeamsSectionProps {
   leagueId: string | undefined;
   username?: string;
+  season?: number;
 }
 
 interface Player {
@@ -43,14 +44,43 @@ interface Team {
   player_count: number;
 }
 
-export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
+export function TeamsSection({ leagueId, username, season }: TeamsSectionProps) {
   const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
   const [showCapital, setShowCapital] = useState(false);
   // Per-team view mode: tracks which teams are showing capital (overrides global)
   const [teamCapitalView, setTeamCapitalView] = useState<Map<number, boolean>>(new Map());
+  // Sort mode for roster players: "rank" (FP Rank) or "value" (Trade Value)
+  const [sortMode, setSortMode] = useState<"rank" | "value">("rank");
 
   const { data: teamsData, isLoading: teamsLoading } = useLeagueTeams(leagueId);
   const { data: capitalData, isLoading: capitalLoading } = useAllDraftCapital(leagueId);
+  
+  // Collect all player IDs from all teams for market values query
+  const allPlayerIds = useMemo(() => {
+    if (!teamsData?.teams) return [];
+    const ids = new Set<string>();
+    for (const team of teamsData.teams) {
+      for (const player of team.players) {
+        ids.add(player.player_id);
+      }
+    }
+    return Array.from(ids);
+  }, [teamsData?.teams]);
+  
+  // Use provided season or default to 2025
+  const marketYear = season || 2025;
+  const { data: marketData } = useMarketValues(allPlayerIds, { asOf: marketYear, sf: false, tep: false });
+  
+  // Create a map for quick lookups
+  const marketValueMap = useMemo(() => {
+    if (!marketData?.values) return new Map<string, { fp_rank: number | null; trade_value: number | null }>();
+    return new Map(
+      marketData.values.map(v => [v.player_id, { 
+        fp_rank: v.fp_rank, 
+        trade_value: v.trade_value_effective 
+      }])
+    );
+  }, [marketData?.values]);
   
   // Toggle per-team capital view
   const toggleTeamCapitalView = (rosterId: number, e: { stopPropagation: () => void }) => {
@@ -203,8 +233,29 @@ export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
 
                   <CollapsibleContent>
                     <div className="border-t p-4">
-                      {/* Per-team toggle */}
-                      <div className="flex justify-end mb-3">
+                      {/* Per-team toggle + sort controls */}
+                      <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-muted-foreground mr-1">Sort:</span>
+                          <Button
+                            variant={sortMode === "rank" ? "secondary" : "ghost"}
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); setSortMode("rank"); }}
+                            data-testid={`button-sort-rank-${team.roster_id}`}
+                          >
+                            <Hash className="w-3 h-3 mr-1" />
+                            Rank
+                          </Button>
+                          <Button
+                            variant={sortMode === "value" ? "secondary" : "ghost"}
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); setSortMode("value"); }}
+                            data-testid={`button-sort-value-${team.roster_id}`}
+                          >
+                            <TrendingUp className="w-3 h-3 mr-1" />
+                            Value
+                          </Button>
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -217,30 +268,65 @@ export function TeamsSection({ leagueId, username }: TeamsSectionProps) {
                       </div>
                       {!getTeamViewMode(team.roster_id) ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
-                          {team.players.map((player) => (
-                            <div 
-                              key={player.player_id}
-                              className="flex items-center gap-2 p-2 rounded-md bg-muted/50"
-                              data-testid={`player-${team.roster_id}-${player.player_id}`}
-                            >
-                              <Badge 
-                                variant="outline" 
-                                className={`text-xs shrink-0 ${positionColor(player.position)}`}
-                              >
-                                {player.position || "?"}
-                              </Badge>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">
-                                  {player.full_name}
-                                </div>
-                                {player.team && (
-                                  <div className="text-xs text-muted-foreground">
-                                    {player.team}
+                          {[...team.players]
+                            .sort((a, b) => {
+                              const mvA = marketValueMap.get(a.player_id);
+                              const mvB = marketValueMap.get(b.player_id);
+                              if (sortMode === "rank") {
+                                const rA = mvA?.fp_rank ?? 999;
+                                const rB = mvB?.fp_rank ?? 999;
+                                return rA - rB;
+                              } else {
+                                const vA = mvA?.trade_value ?? 0;
+                                const vB = mvB?.trade_value ?? 0;
+                                return vB - vA;
+                              }
+                            })
+                            .map((player) => {
+                              const mv = marketValueMap.get(player.player_id);
+                              return (
+                                <div 
+                                  key={player.player_id}
+                                  className="flex flex-col gap-1 p-2 rounded-md bg-muted/50"
+                                  data-testid={`player-${team.roster_id}-${player.player_id}`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Badge 
+                                      variant="outline" 
+                                      className={`text-xs shrink-0 ${positionColor(player.position)}`}
+                                    >
+                                      {player.position || "?"}
+                                    </Badge>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-medium truncate">
+                                        {player.full_name}
+                                      </div>
+                                      {player.team && (
+                                        <div className="text-xs text-muted-foreground">
+                                          {player.team}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
+                                  {mv && (mv.fp_rank || mv.trade_value) && (
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                                      {mv.fp_rank && (
+                                        <span className="flex items-center gap-0.5">
+                                          <Hash className="w-3 h-3" />
+                                          {mv.fp_rank}
+                                        </span>
+                                      )}
+                                      {mv.trade_value && (
+                                        <span className="flex items-center gap-0.5">
+                                          <TrendingUp className="w-3 h-3" />
+                                          {mv.trade_value}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                         </div>
                       ) : teamCapital ? (
                         <div>
