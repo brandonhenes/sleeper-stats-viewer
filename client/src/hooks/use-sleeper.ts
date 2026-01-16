@@ -832,3 +832,40 @@ export function useMarketValues(
     staleTime: 1000 * 60 * 60, // Cache for 1 hour
   });
 }
+
+// Team strength response type
+interface TeamStrengthTeam {
+  roster_id: number;
+  owner_id: string | null;
+  players_total: number;
+  starters_value: number;
+  bench_value: number;
+  picks_total: number;
+  total_assets: number;
+  player_count: number;
+  pick_count: number;
+  asset_rank: number;
+}
+
+interface TeamStrengthResponse {
+  league_id: string;
+  season: number;
+  is_superflex: boolean;
+  is_tep: boolean;
+  teams: TeamStrengthTeam[];
+}
+
+export function useTeamStrength(leagueId: string | undefined, season?: number) {
+  return useQuery<TeamStrengthResponse>({
+    queryKey: ["/api/league", leagueId, "team-strength", season],
+    queryFn: async () => {
+      let url = `/api/league/${leagueId}/team-strength`;
+      if (season) url += `?season=${season}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch team strength");
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
+}

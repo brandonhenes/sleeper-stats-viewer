@@ -16,7 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Loader2, Users, ChevronDown, ChevronRight, Layers, ArrowUpDown, TrendingUp, TrendingDown, Hash, ArrowUp, ArrowDown, Minus } from "lucide-react";
-import { useLeagueTeams, useAllDraftCapital, useMarketValues } from "@/hooks/use-sleeper";
+import { useLeagueTeams, useAllDraftCapital, useMarketValues, useTeamStrength } from "@/hooks/use-sleeper";
 import { motion } from "framer-motion";
 
 interface TeamsSectionProps {
@@ -56,6 +56,20 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
 
   const { data: teamsData, isLoading: teamsLoading } = useLeagueTeams(leagueId);
   const { data: capitalData, isLoading: capitalLoading } = useAllDraftCapital(leagueId);
+  const { data: strengthData } = useTeamStrength(leagueId, season);
+  
+  // Create a map for quick team strength lookup by roster_id
+  const strengthMap = useMemo(() => {
+    if (!strengthData?.teams) return new Map<number, { total_assets: number; asset_rank: number; starters_value: number; picks_total: number }>();
+    return new Map(
+      strengthData.teams.map(t => [t.roster_id, {
+        total_assets: t.total_assets,
+        asset_rank: t.asset_rank,
+        starters_value: t.starters_value,
+        picks_total: t.picks_total,
+      }])
+    );
+  }, [strengthData?.teams]);
   
   // Collect all player IDs from all teams for market values query
   const allPlayerIds = useMemo(() => {
@@ -216,6 +230,9 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
             
             // Get capital data for this team
             const teamCapital = capitalData?.rosters?.find((r: any) => r.roster_id === team.roster_id);
+            
+            // Get team strength data
+            const teamStrength = strengthMap.get(team.roster_id);
 
             return (
               <Collapsible
@@ -256,6 +273,20 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
                       </div>
 
                       <div className="flex items-center gap-4 shrink-0">
+                        {teamStrength && (
+                          <div className="text-right">
+                            <div className="flex items-center gap-1 justify-end">
+                              <span className="text-xs text-muted-foreground">Rank</span>
+                              <Badge variant="default" className="font-mono text-xs" data-testid={`text-rank-${team.roster_id}`}>
+                                #{teamStrength.asset_rank}
+                              </Badge>
+                            </div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              {teamStrength.total_assets.toLocaleString()} pts
+                            </div>
+                          </div>
+                        )}
+                        
                         <div className="text-right">
                           <div className="font-mono font-bold" data-testid={`text-record-${team.roster_id}`}>
                             {formatRecord(team.record)}

@@ -191,6 +191,7 @@ export const draft_pick_values = pgTable("draft_pick_values", {
   updated_at: bigint("updated_at", { mode: "number" }).notNull(),
 }, (table) => [
   index("idx_pick_values_year").on(table.pick_year),
+  uniqueIndex("idx_pick_values_unique").on(table.pick_year, table.pick_round, table.pick_tier),
 ]);
 
 // User exposure summary for trade targeting

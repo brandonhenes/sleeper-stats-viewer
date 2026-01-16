@@ -4484,12 +4484,18 @@ export async function registerRoutes(
       const rosters = await cache.getRostersForLeague(leagueId);
       const allRosterPlayers = await cache.getAllRosterPlayersForLeague(leagueId);
       
-      // Build roster_id -> player_ids map
+      // Build owner_id -> player_ids map (primary) and roster_id -> owner_id fallback
       const rosterPlayersMap = new Map<string, string[]>();
       for (const rp of allRosterPlayers) {
         const key = rp.owner_id;
         if (!rosterPlayersMap.has(key)) rosterPlayersMap.set(key, []);
         rosterPlayersMap.get(key)!.push(rp.player_id);
+      }
+      
+      // Create roster_id -> owner_id mapping for fallback lookups
+      const rosterToOwner = new Map<number, string>();
+      for (const r of rosters) {
+        if (r.owner_id) rosterToOwner.set(r.roster_id, r.owner_id);
       }
       
       // Get all player IDs across all rosters
@@ -4505,6 +4511,9 @@ export async function registerRoutes(
       // Get draft capital for all rosters
       const draftCapital = await jget(`${BASE}/league/${leagueId}/traded_picks`) || [];
       
+      // Pre-fetch all draft pick values to avoid serial awaits
+      const pickValuesCache = await cache.getAllDraftPickValues(asOfYear);
+      
       // Calculate team strength for each roster
       const results: Array<{
         roster_id: number;
@@ -4518,8 +4527,28 @@ export async function registerRoutes(
         pick_count: number;
       }> = [];
 
+      // Helper function to get pick value from cached data
+      const getPickValueFromCache = (pickRound: number, pickOrder: number | null, isSf: boolean): number => {
+        // Determine tier based on pick order
+        let tier = "mid";
+        if (pickRound === 1) {
+          if (pickOrder && pickOrder <= 3) tier = "1.01-1.03";
+          else if (pickOrder && pickOrder <= 6) tier = "1.04-1.06";
+          else tier = "1.07-1.12";
+        } else {
+          if (pickOrder && pickOrder <= totalRosters / 2) tier = "early";
+          else tier = "late";
+        }
+        
+        const match = pickValuesCache.find(pv => pv.pick_round === pickRound && pv.pick_tier === tier);
+        if (!match) return 0;
+        return isSf ? match.value_sf : match.value_1qb;
+      };
+
       for (const roster of rosters) {
-        const players = rosterPlayersMap.get(roster.owner_id) || [];
+        // Try owner_id first, fallback to looking up by roster_id if owner_id is null
+        const ownerId = roster.owner_id || rosterToOwner.get(roster.roster_id) || String(roster.roster_id);
+        const players = rosterPlayersMap.get(ownerId) || rosterPlayersMap.get(roster.owner_id) || [];
         
         // Get player values with positions
         const playerData = players.map((pid: string) => {
@@ -4568,18 +4597,12 @@ export async function registerRoutes(
 
         const playersTotal = startersValue + benchValue;
 
-        // Calculate pick values
+        // Calculate pick values using pre-fetched cache (no serial awaits)
         let picksTotal = 0;
         let pickCount = 0;
         for (const pick of draftCapital) {
           if (pick.owner_id === roster.owner_id || pick.roster_id === roster.roster_id) {
-            const pickValue = await cache.getDraftPickValue(
-              pick.season,
-              pick.round,
-              pick.order || null,
-              totalRosters,
-              isSuperflex
-            );
+            const pickValue = getPickValueFromCache(pick.round, pick.order || null, isSuperflex);
             picksTotal += pickValue;
             pickCount++;
           }
