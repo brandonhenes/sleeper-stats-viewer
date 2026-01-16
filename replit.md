@@ -79,6 +79,34 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 16, 2026 (Team Strength & Enhanced Player Valuations)
+**Database & Schema**:
+- Added `draft_pick_values` table for dynasty pick value charts (2026/2027)
+- Pick values tiered: 1st round (1.01-1.03, 1.04-1.06, 1.07-1.12), 2nd/3rd (early/late)
+- Added unique index on (pick_year, pick_round, pick_tier) for data integrity
+
+**Team Strength API** (`GET /api/league/:leagueId/team-strength`):
+- Computes total asset value for each roster (players + draft picks)
+- Starter selection: greedy best-fit algorithm respecting roster slot eligibility
+- Bench weight: 0.30 multiplier for non-starters
+- Pick valuation: uses pre-fetched draft pick values (optimized, no serial awaits)
+- Format-aware: applies SF/TEP adjustments based on league settings
+- Returns: starters_value, bench_value, picks_total, total_assets, asset_rank
+
+**Market Values API Enhancements**:
+- Now returns: position, fp_tier, trade_value_change, trade_value_effective
+- Effective value computed server-side based on sf/tep flags
+
+**UI Enhancements (TeamsSection)**:
+- Format badges: displays 1QB/SF and TEP badges in header
+- Verdict chips: Elite/Strong/Starter/Depth/Fringe based on FP tier
+- Value deltas: shows arrows with +/- change values
+- Labeled stats: "FP Rank:" and "Value:" with formatted values
+- Team strength display: asset rank badge and total points on team cards
+
+**New Hook**:
+- `useTeamStrength(leagueId, season)`: fetches team strength rankings
+
 ### January 15, 2026 (FantasyPros Market Values Integration + Enhancements)
 **Database & Schema**:
 - Added `player_market_values` table for storing FP rankings and dynasty trade values
