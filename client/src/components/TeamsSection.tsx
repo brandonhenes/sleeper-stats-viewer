@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Users, ChevronDown, ChevronRight, Layers, ArrowUpDown, TrendingUp, Hash } from "lucide-react";
+import { Loader2, Users, ChevronDown, ChevronRight, Layers, ArrowUpDown, TrendingUp, TrendingDown, Hash, ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { useLeagueTeams, useAllDraftCapital, useMarketValues } from "@/hooks/use-sleeper";
 import { motion } from "framer-motion";
 
@@ -73,16 +73,45 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
   const marketYear = season || new Date().getFullYear();
   const { data: marketData } = useMarketValues(allPlayerIds, { asOf: marketYear, sf: isSuperflex, tep: isTep });
   
+  // Extended market value type
+  interface MarketValueInfo {
+    fp_rank: number | null;
+    fp_tier: number | null;
+    trade_value: number | null;
+    trade_value_change: number | null;
+    position: string | null;
+  }
+
   // Create a map for quick lookups
   const marketValueMap = useMemo(() => {
-    if (!marketData?.values) return new Map<string, { fp_rank: number | null; trade_value: number | null }>();
+    if (!marketData?.values) return new Map<string, MarketValueInfo>();
     return new Map(
-      marketData.values.map(v => [v.player_id, { 
+      marketData.values.map((v: any) => [v.player_id, { 
         fp_rank: v.fp_rank, 
-        trade_value: v.trade_value_effective 
+        fp_tier: v.fp_tier,
+        trade_value: v.trade_value_effective,
+        trade_value_change: v.trade_value_change,
+        position: v.position,
       }])
     );
   }, [marketData?.values]);
+
+  // Get verdict chip based on FP tier
+  const getVerdictFromTier = (tier: number | null): { label: string; color: string } | null => {
+    if (tier === null || tier === undefined) return null;
+    if (tier <= 1) return { label: "Elite", color: "bg-purple-500/20 text-purple-700 dark:text-purple-300" };
+    if (tier <= 2) return { label: "Strong", color: "bg-blue-500/20 text-blue-700 dark:text-blue-300" };
+    if (tier <= 4) return { label: "Starter", color: "bg-green-500/20 text-green-700 dark:text-green-300" };
+    if (tier <= 6) return { label: "Depth", color: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-300" };
+    return { label: "Fringe", color: "bg-gray-500/20 text-gray-700 dark:text-gray-300" };
+  };
+
+  // Format value delta with arrow
+  const formatValueDelta = (delta: number | null) => {
+    if (delta === null || delta === undefined || delta === 0) return null;
+    if (delta > 0) return { icon: ArrowUp, text: `+${delta}`, color: "text-green-600 dark:text-green-400" };
+    return { icon: ArrowDown, text: `${delta}`, color: "text-red-600 dark:text-red-400" };
+  };
   
   // Toggle per-team capital view
   const toggleTeamCapitalView = (rosterId: number, e: { stopPropagation: () => void }) => {
@@ -145,10 +174,20 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
       transition={{ duration: 0.3, delay: 0.4 }}
       className="mt-8"
     >
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <Users className="w-6 h-6 text-primary" />
           <h2 className="text-2xl font-display font-bold">Teams</h2>
+          <div className="flex items-center gap-1">
+            <Badge variant="outline" className="text-xs" data-testid="badge-format-qb">
+              {isSuperflex ? "SF" : "1QB"}
+            </Badge>
+            {isTep && (
+              <Badge variant="outline" className="text-xs" data-testid="badge-format-tep">
+                TEP
+              </Badge>
+            )}
+          </div>
         </div>
         <Button 
           variant="outline" 
@@ -286,6 +325,9 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
                             })
                             .map((player) => {
                               const mv = marketValueMap.get(player.player_id);
+                              const verdict = mv ? getVerdictFromTier(mv.fp_tier) : null;
+                              const valueDelta = mv ? formatValueDelta(mv.trade_value_change) : null;
+                              
                               return (
                                 <div 
                                   key={player.player_id}
@@ -310,19 +352,34 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
                                       )}
                                     </div>
                                   </div>
+                                  
+                                  {verdict && (
+                                    <Badge variant="outline" className={`text-xs w-fit ${verdict.color}`}>
+                                      {verdict.label}
+                                    </Badge>
+                                  )}
+                                  
                                   {mv && (mv.fp_rank || mv.trade_value) && (
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                                    <div className="flex flex-col gap-0.5 text-xs text-muted-foreground mt-1">
                                       {mv.fp_rank && (
-                                        <span className="flex items-center gap-0.5">
-                                          <Hash className="w-3 h-3" />
-                                          {mv.fp_rank}
-                                        </span>
+                                        <div className="flex items-center gap-1">
+                                          <Hash className="w-3 h-3 shrink-0" />
+                                          <span>FP Rank:</span>
+                                          <span className="font-mono font-medium">{mv.fp_rank}</span>
+                                        </div>
                                       )}
-                                      {mv.trade_value && (
-                                        <span className="flex items-center gap-0.5">
-                                          <TrendingUp className="w-3 h-3" />
-                                          {mv.trade_value}
-                                        </span>
+                                      {mv.trade_value != null && (
+                                        <div className="flex items-center gap-1">
+                                          <TrendingUp className="w-3 h-3 shrink-0" />
+                                          <span>Value:</span>
+                                          <span className="font-mono font-medium">{mv.trade_value}</span>
+                                          {valueDelta && (
+                                            <span className={`flex items-center ${valueDelta.color}`}>
+                                              <valueDelta.icon className="w-3 h-3" />
+                                              <span className="text-xs">{valueDelta.text}</span>
+                                            </span>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
                                   )}
