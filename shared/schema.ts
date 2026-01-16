@@ -180,6 +180,19 @@ export const player_aliases = pgTable("player_aliases", {
   note: text("note"),
 });
 
+// Draft pick values chart for dynasty trade valuations
+export const draft_pick_values = pgTable("draft_pick_values", {
+  id: serial("id").primaryKey(),
+  pick_year: integer("pick_year").notNull(),
+  pick_round: integer("pick_round").notNull(), // 1, 2, 3, 4+
+  pick_tier: text("pick_tier").notNull(), // "early", "mid", "late" or specific like "1.01-1.03"
+  value_1qb: real("value_1qb").notNull(),
+  value_sf: real("value_sf").notNull(),
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_pick_values_year").on(table.pick_year),
+]);
+
 // User exposure summary for trade targeting
 // Caches each user's player exposure across their active leagues
 export const user_exposure_summary = pgTable("user_exposure_summary", {

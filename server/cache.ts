@@ -1185,6 +1185,7 @@ export const cache = {
     trade_value_std: number | null;
     trade_value_sf: number | null;
     trade_value_tep: number | null;
+    trade_value_change: string | null;
   }>> {
     if (playerIds.length === 0) return [];
     
@@ -1196,6 +1197,7 @@ export const cache = {
         trade_value_std: schema.player_market_values.trade_value_std,
         trade_value_sf: schema.player_market_values.trade_value_sf,
         trade_value_tep: schema.player_market_values.trade_value_tep,
+        trade_value_change: schema.player_market_values.trade_value_change,
         position: schema.players_master.position,
       })
       .from(schema.player_market_values)
@@ -1213,7 +1215,91 @@ export const cache = {
       trade_value_std: r.trade_value_std,
       trade_value_sf: r.trade_value_sf,
       trade_value_tep: r.trade_value_tep,
+      trade_value_change: r.trade_value_change,
     }));
+  },
+
+  async seedDraftPickValues(): Promise<void> {
+    const now = Date.now();
+    const pickValues = [
+      // 2026 picks
+      { pick_year: 2026, pick_round: 1, pick_tier: "1.01-1.03", value_1qb: 49, value_sf: 54 },
+      { pick_year: 2026, pick_round: 1, pick_tier: "1.04-1.06", value_1qb: 42, value_sf: 46 },
+      { pick_year: 2026, pick_round: 1, pick_tier: "1.07-1.12", value_1qb: 35, value_sf: 39 },
+      { pick_year: 2026, pick_round: 2, pick_tier: "early", value_1qb: 25, value_sf: 28 },
+      { pick_year: 2026, pick_round: 2, pick_tier: "late", value_1qb: 18, value_sf: 21 },
+      { pick_year: 2026, pick_round: 3, pick_tier: "early", value_1qb: 10, value_sf: 12 },
+      { pick_year: 2026, pick_round: 3, pick_tier: "late", value_1qb: 6, value_sf: 9 },
+      { pick_year: 2026, pick_round: 4, pick_tier: "all", value_1qb: 1, value_sf: 2 },
+      // 2027 picks
+      { pick_year: 2027, pick_round: 1, pick_tier: "1.01-1.03", value_1qb: 53, value_sf: 58 },
+      { pick_year: 2027, pick_round: 1, pick_tier: "1.04-1.06", value_1qb: 45, value_sf: 49 },
+      { pick_year: 2027, pick_round: 1, pick_tier: "1.07-1.12", value_1qb: 35, value_sf: 39 },
+      { pick_year: 2027, pick_round: 2, pick_tier: "early", value_1qb: 24, value_sf: 27 },
+      { pick_year: 2027, pick_round: 2, pick_tier: "late", value_1qb: 17, value_sf: 20 },
+      { pick_year: 2027, pick_round: 3, pick_tier: "early", value_1qb: 8, value_sf: 10 },
+      { pick_year: 2027, pick_round: 3, pick_tier: "late", value_1qb: 4, value_sf: 7 },
+      { pick_year: 2027, pick_round: 4, pick_tier: "all", value_1qb: 1, value_sf: 2 },
+    ];
+
+    for (const pv of pickValues) {
+      await getDb().insert(schema.draft_pick_values)
+        .values({ ...pv, updated_at: now })
+        .onConflictDoNothing();
+    }
+  },
+
+  async getDraftPickValue(pickYear: number, pickRound: number, pickPosition: number | null, totalRosters: number, isSuperflex: boolean): Promise<number> {
+    const result = await getDb()
+      .select()
+      .from(schema.draft_pick_values)
+      .where(eq(schema.draft_pick_values.pick_year, pickYear));
+    
+    if (result.length === 0) {
+      // Use year discount for future unknown picks
+      const baseValue = pickRound === 1 ? 35 : pickRound === 2 ? 18 : pickRound === 3 ? 6 : 1;
+      const currentYear = new Date().getFullYear();
+      const yearsOut = Math.max(0, pickYear - currentYear);
+      const discount = [1.0, 0.85, 0.72, 0.62][Math.min(yearsOut, 3)];
+      return Math.round(baseValue * discount);
+    }
+
+    // Determine tier based on pick position
+    let tier = "all";
+    if (pickRound === 1) {
+      const pos = pickPosition ?? Math.ceil(totalRosters / 2);
+      if (pos <= 3) tier = "1.01-1.03";
+      else if (pos <= 6) tier = "1.04-1.06";
+      else tier = "1.07-1.12";
+    } else if (pickRound === 2 || pickRound === 3) {
+      const pos = pickPosition ?? Math.ceil(totalRosters / 2);
+      tier = pos <= Math.ceil(totalRosters / 2) ? "early" : "late";
+    }
+
+    const match = result.find(r => r.pick_round === pickRound && r.pick_tier === tier)
+      || result.find(r => r.pick_round === pickRound)
+      || result.find(r => r.pick_round === 4); // fallback to "all others"
+    
+    if (!match) return 1;
+    return isSuperflex ? match.value_sf : match.value_1qb;
+  },
+
+  async getAllDraftPickValues(year: number): Promise<Array<{
+    pick_round: number;
+    pick_tier: string;
+    value_1qb: number;
+    value_sf: number;
+  }>> {
+    const result = await getDb()
+      .select({
+        pick_round: schema.draft_pick_values.pick_round,
+        pick_tier: schema.draft_pick_values.pick_tier,
+        value_1qb: schema.draft_pick_values.value_1qb,
+        value_sf: schema.draft_pick_values.value_sf,
+      })
+      .from(schema.draft_pick_values)
+      .where(eq(schema.draft_pick_values.pick_year, year));
+    return result;
   },
 };
 

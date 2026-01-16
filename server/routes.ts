@@ -4386,9 +4386,13 @@ export async function registerRoutes(
 
       const out = rows.map(r => ({
         player_id: r.player_id,
+        position: r.position,
         fp_rank: r.fp_rank,
         fp_tier: r.fp_tier,
         trade_value_std: r.trade_value_std,
+        trade_value_sf: r.trade_value_sf,
+        trade_value_tep: r.trade_value_tep,
+        trade_value_change: r.trade_value_change,
         trade_value_effective: effectiveTradeValue({
           position: r.position,
           trade_value_std: r.trade_value_std,
@@ -4397,7 +4401,7 @@ export async function registerRoutes(
         }),
       }));
 
-      res.json({ as_of_year: asOf, values: out });
+      res.json({ as_of_year: asOf, sf, tep, values: out });
     } catch (e) {
       console.error("Market values error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
@@ -4418,6 +4422,195 @@ export async function registerRoutes(
       });
     } catch (e) {
       console.error("Import market values error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // POST /api/debug/seed-pick-values - Seed draft pick values chart
+  app.post("/api/debug/seed-pick-values", async (_req, res) => {
+    try {
+      await cache.seedDraftPickValues();
+      res.json({ success: true, message: "Draft pick values seeded" });
+    } catch (e) {
+      console.error("Seed pick values error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // Helper: map roster slot to eligible player positions
+  function getEligiblePositions(slot: string): string[] {
+    switch (slot) {
+      case "QB": return ["QB"];
+      case "RB": return ["RB"];
+      case "WR": return ["WR"];
+      case "TE": return ["TE"];
+      case "K": return ["K"];
+      case "DEF": return ["DEF"];
+      case "FLEX": return ["RB", "WR", "TE"];
+      case "SUPER_FLEX": return ["QB", "RB", "WR", "TE"];
+      case "REC_FLEX": return ["WR", "TE"];
+      case "WRRB_FLEX": return ["WR", "RB"];
+      case "IDP_FLEX": return ["DL", "LB", "DB"];
+      default: return ["QB", "RB", "WR", "TE"];
+    }
+  }
+
+  // GET /api/league/:leagueId/team-strength - Get team strength rankings for all rosters
+  // Query params:
+  //   season: year (optional, defaults to league season)
+  app.get("/api/league/:leagueId/team-strength", async (req, res) => {
+    try {
+      const { leagueId } = req.params;
+      const seasonParam = parseInt(req.query.season as string);
+      
+      // Get league info for format detection and roster positions
+      const league = await cache.getLeagueById(leagueId);
+      if (!league) {
+        return res.status(404).json({ message: "League not found" });
+      }
+      
+      const rawJson = league.raw_json ? JSON.parse(league.raw_json) : {};
+      const rosterPositions: string[] = rawJson.roster_positions || [];
+      const scoringSettings = rawJson.scoring_settings || {};
+      const totalRosters = rawJson.total_rosters || 12;
+      
+      const isSuperflex = rosterPositions.includes("SUPER_FLEX");
+      const isTep = scoringSettings.bonus_rec_te > 0 || (scoringSettings.rec_te && scoringSettings.rec_te > (scoringSettings.rec || 0));
+      
+      const season = seasonParam || league.season;
+      const asOfYear = new Date().getFullYear();
+
+      // Get all rosters and their players
+      const rosters = await cache.getRostersForLeague(leagueId);
+      const allRosterPlayers = await cache.getAllRosterPlayersForLeague(leagueId);
+      
+      // Build roster_id -> player_ids map
+      const rosterPlayersMap = new Map<string, string[]>();
+      for (const rp of allRosterPlayers) {
+        const key = rp.owner_id;
+        if (!rosterPlayersMap.has(key)) rosterPlayersMap.set(key, []);
+        rosterPlayersMap.get(key)!.push(rp.player_id);
+      }
+      
+      // Get all player IDs across all rosters
+      const allPlayerIds = new Set<string>();
+      for (const rp of allRosterPlayers) {
+        allPlayerIds.add(rp.player_id);
+      }
+      
+      // Get market values for all players
+      const marketValues = await cache.getMarketValuesByIds(Array.from(allPlayerIds), asOfYear);
+      const marketMap = new Map(marketValues.map(m => [m.player_id, m]));
+
+      // Get draft capital for all rosters
+      const draftCapital = await jget(`${BASE}/league/${leagueId}/traded_picks`) || [];
+      
+      // Calculate team strength for each roster
+      const results: Array<{
+        roster_id: number;
+        owner_id: string | null;
+        players_total: number;
+        starters_value: number;
+        bench_value: number;
+        picks_total: number;
+        total_assets: number;
+        player_count: number;
+        pick_count: number;
+      }> = [];
+
+      for (const roster of rosters) {
+        const players = rosterPlayersMap.get(roster.owner_id) || [];
+        
+        // Get player values with positions
+        const playerData = players.map((pid: string) => {
+          const mv = marketMap.get(pid);
+          if (!mv) return null;
+          
+          // Calculate effective value based on format
+          let effectiveValue = mv.trade_value_std ?? 0;
+          if (isSuperflex && mv.position === "QB" && mv.trade_value_sf != null) {
+            effectiveValue = mv.trade_value_sf;
+          }
+          if (isTep && mv.position === "TE" && mv.trade_value_tep != null) {
+            effectiveValue = mv.trade_value_tep;
+          }
+          
+          return {
+            player_id: pid,
+            position: mv.position || "FLEX",
+            value: effectiveValue,
+          };
+        }).filter(Boolean) as Array<{ player_id: string; position: string; value: number }>;
+
+        // Sort by value (best first)
+        playerData.sort((a, b) => b.value - a.value);
+
+        // Fill starter slots based on roster positions
+        const starterSlots = rosterPositions.filter((p: string) => p !== "BN" && p !== "IR" && p !== "TAXI");
+        const usedPlayerIds = new Set<string>();
+        let startersValue = 0;
+
+        for (const slot of starterSlots) {
+          const eligiblePositions = getEligiblePositions(slot);
+          const bestFit = playerData.find(p => 
+            eligiblePositions.includes(p.position) && !usedPlayerIds.has(p.player_id)
+          );
+          if (bestFit) {
+            usedPlayerIds.add(bestFit.player_id);
+            startersValue += bestFit.value;
+          }
+        }
+
+        // Bench players at 0.30 weight
+        const benchValue = playerData
+          .filter(p => !usedPlayerIds.has(p.player_id))
+          .reduce((sum, p) => sum + p.value * 0.30, 0);
+
+        const playersTotal = startersValue + benchValue;
+
+        // Calculate pick values
+        let picksTotal = 0;
+        let pickCount = 0;
+        for (const pick of draftCapital) {
+          if (pick.owner_id === roster.owner_id || pick.roster_id === roster.roster_id) {
+            const pickValue = await cache.getDraftPickValue(
+              pick.season,
+              pick.round,
+              pick.order || null,
+              totalRosters,
+              isSuperflex
+            );
+            picksTotal += pickValue;
+            pickCount++;
+          }
+        }
+
+        results.push({
+          roster_id: roster.roster_id,
+          owner_id: roster.owner_id,
+          players_total: Math.round(playersTotal),
+          starters_value: Math.round(startersValue),
+          bench_value: Math.round(benchValue),
+          picks_total: Math.round(picksTotal),
+          total_assets: Math.round(playersTotal + picksTotal),
+          player_count: players.length,
+          pick_count: pickCount,
+        });
+      }
+
+      // Sort by total_assets and add rank
+      results.sort((a, b) => b.total_assets - a.total_assets);
+      const ranked = results.map((r, i) => ({ ...r, asset_rank: i + 1 }));
+
+      res.json({
+        league_id: leagueId,
+        season,
+        is_superflex: isSuperflex,
+        is_tep: isTep,
+        teams: ranked,
+      });
+    } catch (e) {
+      console.error("Team strength error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });
