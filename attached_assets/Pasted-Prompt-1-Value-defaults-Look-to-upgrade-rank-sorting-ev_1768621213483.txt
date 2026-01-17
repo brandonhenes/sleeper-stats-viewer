@@ -1,0 +1,222 @@
+Prompt 1 — Value defaults + “Look to upgrade” + rank sorting everywhere
+Implement the “missing value” behavior and ranking-based sorting across the app.
+
+REQUIREMENTS
+1) Missing player trade value mapping:
+   - trade_value_effective MUST be a number always.
+   - If player has no trade value mapping: trade_value_effective = 0 and has_value = false.
+   - Client UI must display “Look to upgrade” where value is missing (instead of blank/—).
+   - Track coverage_pct per team = % rostered players where has_value true.
+
+2) Team ordering:
+   - Teams must be listed by talent_rank (best to worst), not alphabetical, everywhere.
+   - Profile league tiles must also be ordered by my talent_rank (best leagues first) for the selected season.
+   - Alphabetical is only allowed as tie-breaker when ranks equal.
+
+3) Starter detection:
+   - starter_count must be auto-derived from league.roster_positions (exclude BN/IR/TAXI; include QB/RB/WR/TE/FLEX/SF as starters).
+
+SERVER
+- Enrich teams payload (used by TeamsSection) with:
+  my_roster_id
+  teams[].talent: { starter_value, bench_value, pick_value (0 for now), total_value, talent_rank, coverage_pct }
+  players[].market: { trade_value_effective, has_value, fp_rank (if available), fp_tier (if available) }
+
+- starter_value = sum of top starter_count trade_value_effective among rostered players.
+- bench_value = sum of remaining players (after starters).
+- total_value = starter_value + bench_value + pick_value.
+- talent_rank: sort by starter_value desc, then total_value desc.
+
+CLIENT
+- Teams list sorted by talent_rank.
+- Add “Talent Snapshot” card in league header:
+  “Your Talent Rank #X / N | Starters: A | Bench: B | Picks: 0 | Total: T | Coverage: C%”
+- Profile tile ordering: best leagues first by my talent_rank.
+- Player rows: if has_value false, show label “Look to upgrade” and value 0.
+
+ACCEPTANCE
+- No blank values for players: always number + label when missing.
+- Teams order is best→worst by default everywhere.
+- Tiles reorder by my rank (selected season).
+
+Prompt 2 — Profile sortable league table + rank distribution (#1, #2, …)
+Add a sortable league table on the Profile page driven by server-computed analytics.
+
+GOALS
+1) Profile shows a table with one row per league chain (group_id) for the selected season.
+2) Columns (sortable):
+   League Name | Format (1QB/SF/TEP) | My Talent Rank | Starters | Bench | Picks | Total | Coverage %
+3) Above the table show rank distribution:
+   #1: X leagues | #2: Y | #3: Z | etc (up to max league size)
+4) Default sort:
+   - My Talent Rank asc (1 best) OR Total desc (choose whichever you think looks best).
+
+SERVER
+- Extend /api/overview response to include:
+  group_analytics: [
+    {
+      group_id,
+      league_name,
+      season,
+      format: { superflex: boolean, tep: boolean },
+      my_talent_rank,
+      starter_value,
+      bench_value,
+      pick_value,
+      total_value,
+      coverage_pct
+    }
+  ]
+- Ensure this analytics corresponds to selected season (or the app’s last-completed fallback season logic).
+
+CLIENT
+- Render the table under tiles.
+- Implement client-side sorting.
+- Compute rank distribution from group_analytics.
+
+ACCEPTANCE
+- Table is usable without clicking into any league.
+- Sort by any numeric column works.
+- Rank distribution updates when season changes.
+
+Prompt 3 — Draft pick values (your chart) + include in totals + sorting
+Implement Draft Picks Value using the provided chart and integrate it into team totals and the profile table.
+
+PICK VALUE CHART (use exact data; normalize “–” to “-”):
+2026:
+  "1.01 - 1.03" => 1QB 49, SF 54
+  "1.04 - 1.06" => 1QB 42, SF 46
+  "1.07 - 1.12" => 1QB 35, SF 39
+  "Early second" => 1QB 25, SF 28
+  "Late second" => 1QB 18, SF 21
+  "Early third" => 1QB 10, SF 12
+  "Late third" => 1QB 6, SF 9
+  "All others" => 1QB 1, SF 2
+2027:
+  "1.01 - 1.03" => 1QB 53, SF 58
+  "1.04 - 1.06" => 1QB 45, SF 49
+  "1.07 - 1.12" => 1QB 35, SF 39
+  "Early second" => 1QB 24, SF 27
+  "Late second" => 1QB 17, SF 20
+  "Early third" => 1QB 8, SF 10
+  "Late third" => 1QB 4, SF 7
+  "All others" => 1QB 1, SF 2
+
+GOALS
+1) Compute pick_value per roster for selected season view:
+   - fetch traded picks for that league (existing picks endpoint)
+   - sum values of picks owned by each roster_id
+2) Sleeper picks don’t include exact 1.04 vs 1.10, so PROJECT a bucket based on original roster strength:
+   - Use original roster’s talent_rank for the selected season (or last-completed fallback if preseason).
+   - total_rosters = league.total_rosters
+   - projected_pick_num = total_rosters - talent_rank + 1
+   - percentile = (projected_pick_num - 1) / (total_rosters - 1)
+   Bucket mapping:
+     Round 1:
+       percentile <= 0.25 => "1.01 - 1.03"
+       percentile <= 0.50 => "1.04 - 1.06"
+       else => "1.07 - 1.12"
+     Round 2:
+       percentile <= 0.50 => "Early second" else "Late second"
+     Round 3:
+       percentile <= 0.50 => "Early third" else "Late third"
+     Round >=4:
+       "All others"
+3) Choose chart column based on league format:
+   - superflex => SF values
+   - else => 1QB values
+   - TEP does not affect pick values.
+4) Missing year handling:
+   - if year not in chart, fallback to closest available (2027) and bucket "All others" if needed.
+5) Integrate into totals:
+   - total_value = starter_value + bench_value + pick_value
+   - re-rank talent_rank using starter_value (primary), total_value (tiebreak)
+
+CLIENT
+- Show Picks value in:
+  - Talent Snapshot card
+  - Teams list rows
+  - Profile league table
+- Allow sorting by Picks and Total.
+
+ACCEPTANCE
+- Every team has numeric pick_value.
+- Picks differ between 1QB and SF leagues.
+- Profile table columns update and sort correctly.
+
+Prompt 4 — Gap finder + compatible trade partners + picks add-on (the “exploit engine”)
+Implement gap analysis + trade partner matching and incorporate pick-based offers.
+
+GOALS
+1) Compute positional strength for each team using trade_value_effective (missing => 0):
+   - Determine required starters per position from league.roster_positions:
+     QB, RB, WR, TE
+     FLEX (RB/WR/TE pool beyond required)
+     SF (QB/RB/WR/TE pool; but prioritize QBs naturally due to higher SF values)
+   - For each roster_id compute:
+     strength_by_pos: { QB, RB, WR, TE, FLEX, SF }
+     starter_value, bench_value, pick_value, total_value (existing)
+2) For MY roster:
+   - needs = positions where my strength < league median strength for that position
+   - surplus = positions where my strength > league median
+3) Find partners:
+   - Partners that have surplus in my needs AND needs in my surplus
+   - compatibility_score based on overlap magnitude:
+     score = sum( (partner_surplus[pos] - median[pos]) + (median[pos] - my_strength[pos]) ) across matched positions
+4) Suggestions (actionable):
+   - target_players: from partner at needed positions, prefer bench/non-starters first, highest value
+   - offer_players: from my roster at positions partner needs, prefer bench first, highest value
+5) PICK add-on:
+   - If I have low starter_value but high pick_value: recommend using picks to buy starters.
+   - If I’m strong starter_value but low pick_value: recommend selling depth for picks.
+   - Include pick suggestions in the response:
+     offer_picks: list of my owned picks (season, round, projected bucket, value) that fit the gap
+     ask_picks: list of partner picks if the trade makes sense
+
+SERVER
+- New endpoint:
+  GET /api/league/:leagueId/trade-partners?rosterId=MY&asOfYear=2025
+  Return:
+  {
+    format: { superflex, tep },
+    my: {
+      roster_id,
+      needs: [{ pos, deficit, median, mine }],
+      surplus: [{ pos, surplus, median, mine }],
+      starter_value, bench_value, pick_value, total_value,
+    },
+    partners: [
+      {
+        roster_id,
+        name,
+        compatibility_score,
+        needs, surplus,
+        target_players: [{ player_id, name, pos, value, has_value }],
+        offer_players: [{ player_id, name, pos, value, has_value }],
+        offer_picks: [{ season, round, bucket, value }],
+        ask_picks: [{ season, round, bucket, value }],
+      }
+    ]
+  }
+
+CLIENT
+- Update Trade Targets view to use this endpoint.
+- Display:
+  - My gaps (needs) and my strengths (surplus)
+  - Top 3 partners with a short “why”
+  - Expand for targets/offers/picks
+
+ACCEPTANCE
+- Trade Targets works without clicking into individual teams.
+- Partners are ranked and suggestions include players + picks when relevant.
+- Missing player values never break scoring (they are 0 + “Look to upgrade”).
+
+One key UX note (so this doesn’t get messy again)
+
+When the agent implements this, keep it scannable:
+
+League page header: snapshot + your rank
+
+Teams: ranked list with value columns
+
+Trade Targets: top 3 partners by default, expandable

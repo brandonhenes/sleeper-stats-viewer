@@ -8,6 +8,7 @@ import { leagueSummarySchema } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { getStorageMode } from "./db";
 import { importMarketValues } from "./marketValues/importMarketValues";
+import { importFromAttachedAsset as importPickValuesFromCSV } from "./marketValues/importDraftPickValues";
 
 const BASE = "https://api.sleeper.app/v1";
 
@@ -4433,6 +4434,17 @@ export async function registerRoutes(
       res.json({ success: true, message: "Draft pick values seeded" });
     } catch (e) {
       console.error("Seed pick values error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // POST /api/debug/import-pick-values - Import draft pick values from CSV
+  app.post("/api/debug/import-pick-values", async (_req, res) => {
+    try {
+      const result = await importPickValuesFromCSV();
+      res.json({ success: true, ...result });
+    } catch (e) {
+      console.error("Import pick values error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

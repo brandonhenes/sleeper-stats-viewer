@@ -1301,6 +1301,49 @@ export const cache = {
       .where(eq(schema.draft_pick_values.pick_year, year));
     return result;
   },
+
+  async upsertDraftPickValue(data: {
+    pick_year: number;
+    pick_round: number;
+    pick_tier: string;
+    value_1qb: number;
+    value_sf: number;
+  }): Promise<void> {
+    const now = Date.now();
+    await getDb()
+      .insert(schema.draft_pick_values)
+      .values({
+        pick_year: data.pick_year,
+        pick_round: data.pick_round,
+        pick_tier: data.pick_tier,
+        value_1qb: data.value_1qb,
+        value_sf: data.value_sf,
+        updated_at: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.draft_pick_values.pick_year,
+          schema.draft_pick_values.pick_round,
+          schema.draft_pick_values.pick_tier,
+        ],
+        set: {
+          value_1qb: data.value_1qb,
+          value_sf: data.value_sf,
+          updated_at: now,
+        },
+      });
+  },
+
+  async clearDraftPickValues(year?: number): Promise<number> {
+    if (year) {
+      const result = await getDb()
+        .delete(schema.draft_pick_values)
+        .where(eq(schema.draft_pick_values.pick_year, year));
+      return result.rowCount ?? 0;
+    }
+    const result = await getDb().delete(schema.draft_pick_values);
+    return result.rowCount ?? 0;
+  },
 };
 
 export default cache;
