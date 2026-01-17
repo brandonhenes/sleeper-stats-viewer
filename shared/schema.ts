@@ -294,7 +294,7 @@ export const powerRankingSchema = z.object({
   lowConfidence: z.boolean(),
   formatFlags: z.object({
     superflex: z.boolean(),
-    tep: z.boolean(),
+    tep: z.boolean().optional(),
   }),
 });
 
