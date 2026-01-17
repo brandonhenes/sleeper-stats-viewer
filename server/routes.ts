@@ -1003,6 +1003,239 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/group-analytics - Get talent analytics for all league groups
+  // Query params:
+  //   username: Sleeper username (required)
+  //   season: filter to specific season (optional)
+  app.get("/api/group-analytics", async (req, res) => {
+    try {
+      const username = (req.query.username as string || "").trim();
+      const seasonFilter = req.query.season ? parseInt(req.query.season as string) : undefined;
+      
+      if (!username) {
+        return res.status(400).json({ message: "Username required" });
+      }
+
+      const cachedUser = await cache.getUserByUsername(username);
+      if (!cachedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const leagueGroups = await buildLeagueGroups(cachedUser.user_id);
+      const asOfYear = new Date().getFullYear();
+      
+      // Compute analytics for each league group
+      const groupAnalytics: Array<{
+        group_id: string;
+        league_name: string;
+        league_id: string;
+        season: number;
+        format: { superflex: boolean; tep: boolean };
+        my_talent_rank: number | null;
+        starter_value: number;
+        bench_value: number;
+        pick_value: number;
+        total_value: number;
+        coverage_pct: number;
+        total_rosters: number;
+      }> = [];
+
+      for (const group of leagueGroups) {
+        // Find the league for the requested season (or latest)
+        let targetLeagueId: string | null = null;
+        let targetSeason: number | null = null;
+        
+        if (seasonFilter && group.seasons_to_league) {
+          const match = group.seasons_to_league.find((s: any) => s.season === seasonFilter);
+          if (match) {
+            targetLeagueId = match.league_id;
+            targetSeason = match.season;
+          }
+        }
+        
+        if (!targetLeagueId) {
+          targetLeagueId = group.latest_league_id || group.league_ids?.[group.league_ids.length - 1];
+          targetSeason = group.max_season;
+        }
+        
+        if (!targetLeagueId) continue;
+
+        // Get league details
+        const league = await cache.getLeagueById(targetLeagueId);
+        if (!league) continue;
+
+        const rawJson = league.raw_json ? JSON.parse(league.raw_json) : {};
+        const rosterPositions: string[] = rawJson.roster_positions || [];
+        const scoringSettings = rawJson.scoring_settings || {};
+        const totalRosters = rawJson.total_rosters || 12;
+
+        const isSuperflex = rosterPositions.includes("SUPER_FLEX");
+        const isTep = scoringSettings.bonus_rec_te > 0 || (scoringSettings.rec_te && scoringSettings.rec_te > (scoringSettings.rec || 0));
+
+        // Get rosters
+        const rosters = await cache.getRostersForLeague(targetLeagueId);
+        const allRosterPlayers = await cache.getAllRosterPlayersForLeague(targetLeagueId);
+        
+        // Find user's roster
+        const myRoster = rosters.find(r => r.owner_id === cachedUser.user_id);
+        if (!myRoster) continue;
+
+        // Build player map
+        const rosterPlayersMap = new Map<string, string[]>();
+        for (const rp of allRosterPlayers) {
+          const key = rp.owner_id;
+          if (!rosterPlayersMap.has(key)) rosterPlayersMap.set(key, []);
+          rosterPlayersMap.get(key)!.push(rp.player_id);
+        }
+
+        const allPlayerIds = new Set<string>();
+        for (const rp of allRosterPlayers) allPlayerIds.add(rp.player_id);
+
+        const marketValues = await cache.getMarketValuesByIds(Array.from(allPlayerIds), asOfYear);
+        const marketMap = new Map(marketValues.map(m => [m.player_id, m]));
+
+        // Get pick values
+        const pickValuesCache = await cache.getAllDraftPickValues(asOfYear);
+        const draftCapital = await jget(`${BASE}/league/${targetLeagueId}/traded_picks`) || [];
+
+        // Calculate starter slots
+        const starterSlots = rosterPositions.filter((p: string) => p !== "BN" && p !== "IR" && p !== "TAXI");
+
+        // Calculate all team strengths to get rankings
+        const teamResults: Array<{
+          roster_id: number;
+          owner_id: string | null;
+          starters_value: number;
+          bench_value: number;
+          picks_total: number;
+          total_value: number;
+          coverage_pct: number;
+        }> = [];
+
+        for (const roster of rosters) {
+          const players = rosterPlayersMap.get(roster.owner_id) || [];
+          let playersWithValue = 0;
+          
+          const playerData = players.map((pid: string) => {
+            const mv = marketMap.get(pid);
+            let effectiveValue = 0;
+            let hasValue = false;
+            
+            if (mv) {
+              const baseValue = mv.trade_value_std ?? null;
+              if (baseValue !== null) {
+                hasValue = true;
+                effectiveValue = baseValue;
+                if (isSuperflex && mv.position === "QB" && mv.trade_value_sf != null) {
+                  effectiveValue = mv.trade_value_sf;
+                }
+                if (isTep && mv.position === "TE" && mv.trade_value_tep != null) {
+                  effectiveValue = mv.trade_value_tep;
+                }
+              }
+            }
+            
+            if (hasValue) playersWithValue++;
+            return { player_id: pid, position: mv?.position || "FLEX", value: effectiveValue };
+          });
+
+          playerData.sort((a, b) => b.value - a.value);
+
+          const usedPlayerIds = new Set<string>();
+          let startersValue = 0;
+
+          for (const slot of starterSlots) {
+            const eligiblePositions = getEligiblePositions(slot);
+            const bestFit = playerData.find(p => 
+              eligiblePositions.includes(p.position) && !usedPlayerIds.has(p.player_id)
+            );
+            if (bestFit) {
+              usedPlayerIds.add(bestFit.player_id);
+              startersValue += bestFit.value;
+            }
+          }
+
+          const benchValue = playerData
+            .filter(p => !usedPlayerIds.has(p.player_id))
+            .reduce((sum, p) => sum + p.value * 0.30, 0);
+
+          // Calculate pick values
+          let picksTotal = 0;
+          for (const pick of draftCapital) {
+            if (pick.owner_id === roster.owner_id || pick.roster_id === roster.roster_id) {
+              const order = pick.order ?? Math.ceil(totalRosters / 2);
+              let tier = "all";
+              
+              if (pick.round === 1) {
+                const percentile = (order - 1) / Math.max(totalRosters - 1, 1);
+                if (percentile <= 0.25) tier = "1.01-1.03";
+                else if (percentile <= 0.50) tier = "1.04-1.06";
+                else tier = "1.07-1.12";
+              } else if (pick.round === 2) {
+                tier = order <= totalRosters / 2 ? "early" : "late";
+              } else if (pick.round === 3) {
+                tier = order <= totalRosters / 2 ? "early" : "late";
+              }
+              
+              const effectiveRound = pick.round >= 4 ? 4 : pick.round;
+              const match = pickValuesCache.find(pv => pv.pick_round === effectiveRound && pv.pick_tier === tier);
+              if (match) {
+                picksTotal += isSuperflex ? match.value_sf : match.value_1qb;
+              }
+            }
+          }
+
+          teamResults.push({
+            roster_id: roster.roster_id,
+            owner_id: roster.owner_id,
+            starters_value: Math.round(startersValue),
+            bench_value: Math.round(benchValue),
+            picks_total: Math.round(picksTotal),
+            total_value: Math.round(startersValue + benchValue + picksTotal),
+            coverage_pct: players.length > 0 ? Math.round((playersWithValue / players.length) * 100) : 0,
+          });
+        }
+
+        // Sort by starters_value then total_value to get ranks
+        teamResults.sort((a, b) => {
+          if (b.starters_value !== a.starters_value) return b.starters_value - a.starters_value;
+          return b.total_value - a.total_value;
+        });
+
+        // Find user's rank
+        const myIndex = teamResults.findIndex(t => t.owner_id === cachedUser.user_id);
+        const myStats = myIndex >= 0 ? teamResults[myIndex] : null;
+
+        groupAnalytics.push({
+          group_id: group.group_id,
+          league_name: group.name,
+          league_id: targetLeagueId,
+          season: targetSeason || group.max_season,
+          format: { superflex: isSuperflex, tep: isTep },
+          my_talent_rank: myIndex >= 0 ? myIndex + 1 : null,
+          starter_value: myStats?.starters_value ?? 0,
+          bench_value: myStats?.bench_value ?? 0,
+          pick_value: myStats?.picks_total ?? 0,
+          total_value: myStats?.total_value ?? 0,
+          coverage_pct: myStats?.coverage_pct ?? 0,
+          total_rosters: totalRosters,
+        });
+      }
+
+      // Sort by talent rank (best first)
+      groupAnalytics.sort((a, b) => (a.my_talent_rank ?? 999) - (b.my_talent_rank ?? 999));
+
+      res.json({
+        username,
+        season: seasonFilter || "all",
+        group_analytics: groupAnalytics,
+      });
+    } catch (e) {
+      console.error("Group analytics error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
   // POST /api/sync - Starts a background sync job (non-blocking)
   app.post(api.sleeper.sync.path, async (req, res) => {
     try {
@@ -4375,32 +4608,42 @@ export async function registerRoutes(
         trade_value_std?: number | null;
         trade_value_sf?: number | null;
         trade_value_tep?: number | null;
-      }): number | null => {
+      }): { value: number; has_value: boolean } => {
         const base = row.trade_value_std ?? null;
         const pos = row.position ?? null;
-        if (base === null && base !== 0) return null;
         
-        if (sf && pos === "QB" && row.trade_value_sf != null) return row.trade_value_sf;
-        if (tep && pos === "TE" && row.trade_value_tep != null) return row.trade_value_tep;
-        return base;
+        // If no base value at all, return 0 with has_value false
+        if (base === null) return { value: 0, has_value: false };
+        
+        if (sf && pos === "QB" && row.trade_value_sf != null) {
+          return { value: row.trade_value_sf, has_value: true };
+        }
+        if (tep && pos === "TE" && row.trade_value_tep != null) {
+          return { value: row.trade_value_tep, has_value: true };
+        }
+        return { value: base, has_value: true };
       };
 
-      const out = rows.map(r => ({
-        player_id: r.player_id,
-        position: r.position,
-        fp_rank: r.fp_rank,
-        fp_tier: r.fp_tier,
-        trade_value_std: r.trade_value_std,
-        trade_value_sf: r.trade_value_sf,
-        trade_value_tep: r.trade_value_tep,
-        trade_value_change: r.trade_value_change,
-        trade_value_effective: effectiveTradeValue({
+      const out = rows.map(r => {
+        const effective = effectiveTradeValue({
           position: r.position,
           trade_value_std: r.trade_value_std,
           trade_value_sf: r.trade_value_sf,
           trade_value_tep: r.trade_value_tep,
-        }),
-      }));
+        });
+        return {
+          player_id: r.player_id,
+          position: r.position,
+          fp_rank: r.fp_rank,
+          fp_tier: r.fp_tier,
+          trade_value_std: r.trade_value_std,
+          trade_value_sf: r.trade_value_sf,
+          trade_value_tep: r.trade_value_tep,
+          trade_value_change: r.trade_value_change,
+          trade_value_effective: effective.value,
+          has_value: effective.has_value,
+        };
+      });
 
       res.json({ as_of_year: asOf, sf, tep, values: out });
     } catch (e) {
@@ -4526,6 +4769,12 @@ export async function registerRoutes(
       // Pre-fetch all draft pick values to avoid serial awaits
       const pickValuesCache = await cache.getAllDraftPickValues(asOfYear);
       
+      // Calculate starter count from roster positions
+      const starterSlots = rosterPositions.filter((p: string) => 
+        p !== "BN" && p !== "IR" && p !== "TAXI"
+      );
+      const starterCount = starterSlots.length;
+
       // Calculate team strength for each roster
       const results: Array<{
         roster_id: number;
@@ -4537,57 +4786,94 @@ export async function registerRoutes(
         total_assets: number;
         player_count: number;
         pick_count: number;
+        coverage_pct: number;
+        players_with_value: number;
       }> = [];
 
-      // Helper function to get pick value from cached data
-      const getPickValueFromCache = (pickRound: number, pickOrder: number | null, isSf: boolean): number => {
-        // Determine tier based on pick order
+      // Helper function to get pick value from cached data with projected bucket
+      const getPickValueFromCache = (pickRound: number, pickOrder: number | null, isSf: boolean, pickYear?: number): number => {
+        // Determine tier based on pick order or use mid-point if unknown
         let tier = "mid";
+        const order = pickOrder ?? Math.ceil(totalRosters / 2);
+        
         if (pickRound === 1) {
-          if (pickOrder && pickOrder <= 3) tier = "1.01-1.03";
-          else if (pickOrder && pickOrder <= 6) tier = "1.04-1.06";
+          const percentile = (order - 1) / Math.max(totalRosters - 1, 1);
+          if (percentile <= 0.25) tier = "1.01-1.03";
+          else if (percentile <= 0.50) tier = "1.04-1.06";
           else tier = "1.07-1.12";
+        } else if (pickRound === 2) {
+          const percentile = (order - 1) / Math.max(totalRosters - 1, 1);
+          tier = percentile <= 0.50 ? "early" : "late";
+        } else if (pickRound === 3) {
+          const percentile = (order - 1) / Math.max(totalRosters - 1, 1);
+          tier = percentile <= 0.50 ? "early" : "late";
         } else {
-          if (pickOrder && pickOrder <= totalRosters / 2) tier = "early";
-          else tier = "late";
+          tier = "all";
         }
         
-        const match = pickValuesCache.find(pv => pv.pick_round === pickRound && pv.pick_tier === tier);
-        if (!match) return 0;
+        // Use round 4 for rounds >= 4 since they share "all others" bucket
+        const effectiveRound = pickRound >= 4 ? 4 : pickRound;
+        
+        const match = pickValuesCache.find(pv => pv.pick_round === effectiveRound && pv.pick_tier === tier);
+        if (!match) {
+          // Fallback to "all" tier if no match
+          const fallback = pickValuesCache.find(pv => pv.pick_round === 4 && pv.pick_tier === "all");
+          return fallback ? (isSf ? fallback.value_sf : fallback.value_1qb) : 0;
+        }
         return isSf ? match.value_sf : match.value_1qb;
       };
+
+      // Get all players' info including positions from cache
+      const playerInfoMap = new Map<string, { position: string | null }>();
+      const playerRecords = await cache.getPlayersByIds(Array.from(allPlayerIds));
+      for (const p of playerRecords) {
+        playerInfoMap.set(p.player_id, { position: p.position });
+      }
 
       for (const roster of rosters) {
         // Try owner_id first, fallback to looking up by roster_id if owner_id is null
         const ownerId = roster.owner_id || rosterToOwner.get(roster.roster_id) || String(roster.roster_id);
         const players = rosterPlayersMap.get(ownerId) || rosterPlayersMap.get(roster.owner_id) || [];
         
-        // Get player values with positions
+        // Get player values with positions - include ALL players even without market value
+        let playersWithValue = 0;
         const playerData = players.map((pid: string) => {
           const mv = marketMap.get(pid);
-          if (!mv) return null;
+          const playerInfo = playerInfoMap.get(pid);
+          const position = mv?.position || playerInfo?.position || "FLEX";
           
           // Calculate effective value based on format
-          let effectiveValue = mv.trade_value_std ?? 0;
-          if (isSuperflex && mv.position === "QB" && mv.trade_value_sf != null) {
-            effectiveValue = mv.trade_value_sf;
+          let effectiveValue = 0;
+          let hasValue = false;
+          
+          if (mv) {
+            const baseValue = mv.trade_value_std ?? null;
+            if (baseValue !== null) {
+              hasValue = true;
+              effectiveValue = baseValue;
+              if (isSuperflex && mv.position === "QB" && mv.trade_value_sf != null) {
+                effectiveValue = mv.trade_value_sf;
+              }
+              if (isTep && mv.position === "TE" && mv.trade_value_tep != null) {
+                effectiveValue = mv.trade_value_tep;
+              }
+            }
           }
-          if (isTep && mv.position === "TE" && mv.trade_value_tep != null) {
-            effectiveValue = mv.trade_value_tep;
-          }
+          
+          if (hasValue) playersWithValue++;
           
           return {
             player_id: pid,
-            position: mv.position || "FLEX",
+            position,
             value: effectiveValue,
+            has_value: hasValue,
           };
-        }).filter(Boolean) as Array<{ player_id: string; position: string; value: number }>;
+        });
 
         // Sort by value (best first)
         playerData.sort((a, b) => b.value - a.value);
 
         // Fill starter slots based on roster positions
-        const starterSlots = rosterPositions.filter((p: string) => p !== "BN" && p !== "IR" && p !== "TAXI");
         const usedPlayerIds = new Set<string>();
         let startersValue = 0;
 
@@ -4614,11 +4900,16 @@ export async function registerRoutes(
         let pickCount = 0;
         for (const pick of draftCapital) {
           if (pick.owner_id === roster.owner_id || pick.roster_id === roster.roster_id) {
-            const pickValue = getPickValueFromCache(pick.round, pick.order || null, isSuperflex);
+            const pickValue = getPickValueFromCache(pick.round, pick.order || null, isSuperflex, pick.season);
             picksTotal += pickValue;
             pickCount++;
           }
         }
+
+        // Calculate coverage percentage (% of players with value data)
+        const coveragePct = players.length > 0 
+          ? Math.round((playersWithValue / players.length) * 100) 
+          : 0;
 
         results.push({
           roster_id: roster.roster_id,
@@ -4630,18 +4921,27 @@ export async function registerRoutes(
           total_assets: Math.round(playersTotal + picksTotal),
           player_count: players.length,
           pick_count: pickCount,
+          coverage_pct: coveragePct,
+          players_with_value: playersWithValue,
         });
       }
 
-      // Sort by total_assets and add rank
-      results.sort((a, b) => b.total_assets - a.total_assets);
-      const ranked = results.map((r, i) => ({ ...r, asset_rank: i + 1 }));
+      // Sort by starter_value (primary), then total_assets (tiebreaker) - talent_rank
+      results.sort((a, b) => {
+        if (b.starters_value !== a.starters_value) {
+          return b.starters_value - a.starters_value;
+        }
+        return b.total_assets - a.total_assets;
+      });
+      const ranked = results.map((r, i) => ({ ...r, talent_rank: i + 1 }));
 
       res.json({
         league_id: leagueId,
         season,
         is_superflex: isSuperflex,
         is_tep: isTep,
+        starter_count: starterCount,
+        total_rosters: totalRosters,
         teams: ranked,
       });
     } catch (e) {

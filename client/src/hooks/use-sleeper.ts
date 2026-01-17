@@ -844,7 +844,9 @@ interface TeamStrengthTeam {
   total_assets: number;
   player_count: number;
   pick_count: number;
-  asset_rank: number;
+  talent_rank: number;
+  coverage_pct: number;
+  players_with_value: number;
 }
 
 interface TeamStrengthResponse {
@@ -852,6 +854,8 @@ interface TeamStrengthResponse {
   season: number;
   is_superflex: boolean;
   is_tep: boolean;
+  starter_count: number;
+  total_rosters: number;
   teams: TeamStrengthTeam[];
 }
 
@@ -866,6 +870,43 @@ export function useTeamStrength(leagueId: string | undefined, season?: number) {
       return res.json();
     },
     enabled: !!leagueId,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
+}
+
+// Group analytics types
+interface GroupAnalyticsItem {
+  group_id: string;
+  league_name: string;
+  league_id: string;
+  season: number;
+  format: { superflex: boolean; tep: boolean };
+  my_talent_rank: number | null;
+  starter_value: number;
+  bench_value: number;
+  pick_value: number;
+  total_value: number;
+  coverage_pct: number;
+  total_rosters: number;
+}
+
+interface GroupAnalyticsResponse {
+  username: string;
+  season: number | string;
+  group_analytics: GroupAnalyticsItem[];
+}
+
+export function useGroupAnalytics(username: string | undefined, season?: number) {
+  return useQuery<GroupAnalyticsResponse>({
+    queryKey: ["/api/group-analytics", username, season],
+    queryFn: async () => {
+      let url = `/api/group-analytics?username=${encodeURIComponent(username || "")}`;
+      if (season) url += `&season=${season}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch group analytics");
+      return res.json();
+    },
+    enabled: !!username,
     staleTime: 1000 * 60 * 5, // Cache for 5 minutes
   });
 }

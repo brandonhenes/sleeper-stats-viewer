@@ -79,6 +79,24 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 17, 2026 (Group Analytics & Profile Table View)
+**New API Endpoint**:
+- `GET /api/group-analytics?username=<username>&season=<season>`: Computes talent analytics for all league groups
+- Returns: group_id, league_name, league_id, season, format (SF/TEP flags), my_talent_rank, starter_value, bench_value, pick_value, total_value, coverage_pct, total_rosters
+- Filters by season when provided, otherwise uses latest season per group
+
+**Profile Page Enhancements**:
+- Added Cards/Table display mode toggle (LayoutGrid/LayoutList icons)
+- Table view shows sortable league analytics with columns: League, Format, Rank, Starters, Bench, Picks, Total, Coverage
+- Clickable column headers for sorting (name, rank, starters, total, coverage)
+- Rank distribution summary: Top 3, Top 6, Avg Rank
+- Color-coded rank badges based on percentile (green=top 25%, blue=top 50%, yellow=top 75%, red=bottom 25%)
+- Table respects same filters as cards view (season, type, active/history)
+- Clickable rows navigate to league details using Wouter routing
+
+**New Hook**:
+- `useGroupAnalytics(username, season)`: fetches group-level talent analytics
+
 ### January 16, 2026 (Team Strength & Enhanced Player Valuations)
 **Database & Schema**:
 - Added `draft_pick_values` table for dynasty pick value charts (2026/2027)

@@ -60,13 +60,22 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
   
   // Create a map for quick team strength lookup by roster_id
   const strengthMap = useMemo(() => {
-    if (!strengthData?.teams) return new Map<number, { total_assets: number; asset_rank: number; starters_value: number; picks_total: number }>();
+    if (!strengthData?.teams) return new Map<number, { 
+      total_assets: number; 
+      talent_rank: number; 
+      starters_value: number; 
+      bench_value: number;
+      picks_total: number;
+      coverage_pct: number;
+    }>();
     return new Map(
-      strengthData.teams.map(t => [t.roster_id, {
+      strengthData.teams.map((t: any) => [t.roster_id, {
         total_assets: t.total_assets,
-        asset_rank: t.asset_rank,
+        talent_rank: t.talent_rank,
         starters_value: t.starters_value,
+        bench_value: t.bench_value,
         picks_total: t.picks_total,
+        coverage_pct: t.coverage_pct,
       }])
     );
   }, [strengthData?.teams]);
@@ -91,9 +100,10 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
   interface MarketValueInfo {
     fp_rank: number | null;
     fp_tier: number | null;
-    trade_value: number | null;
+    trade_value: number;
     trade_value_change: number | null;
     position: string | null;
+    has_value: boolean;
   }
 
   // Create a map for quick lookups
@@ -103,12 +113,39 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
       marketData.values.map((v: any) => [v.player_id, { 
         fp_rank: v.fp_rank, 
         fp_tier: v.fp_tier,
-        trade_value: v.trade_value_effective,
+        trade_value: v.trade_value_effective ?? 0,
         trade_value_change: v.trade_value_change,
         position: v.position,
+        has_value: v.has_value ?? false,
       }])
     );
   }, [marketData?.values]);
+
+  // Sort teams by talent_rank (best first)
+  const sortedTeams = useMemo(() => {
+    if (!teamsData?.teams) return [];
+    const teams = [...teamsData.teams];
+    teams.sort((a: Team, b: Team) => {
+      const aStrength = strengthMap.get(a.roster_id);
+      const bStrength = strengthMap.get(b.roster_id);
+      const aRank = aStrength?.talent_rank ?? 999;
+      const bRank = bStrength?.talent_rank ?? 999;
+      if (aRank !== bRank) return aRank - bRank;
+      // Alphabetical tiebreaker
+      return (a.display_name || "").localeCompare(b.display_name || "");
+    });
+    return teams;
+  }, [teamsData?.teams, strengthMap]);
+
+  // Find current user's team strength for snapshot
+  const myTeamStrength = useMemo(() => {
+    if (!username || !teamsData?.teams) return null;
+    const myTeam = teamsData.teams.find((t: Team) => 
+      t.display_name?.toLowerCase() === username.toLowerCase()
+    );
+    if (!myTeam) return null;
+    return strengthMap.get(myTeam.roster_id);
+  }, [username, teamsData?.teams, strengthMap]);
 
   // Get verdict chip based on FP tier
   const getVerdictFromTier = (tier: number | null): { label: string; color: string } | null => {
@@ -224,7 +261,43 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
         </div>
       ) : teamsData && teamsData.teams ? (
         <div className="space-y-3">
-          {teamsData.teams.map((team: Team) => {
+          {/* Talent Snapshot Card */}
+          {myTeamStrength && strengthData && (
+            <Card className="p-4 bg-primary/5 border-primary/20" data-testid="card-talent-snapshot">
+              <div className="flex items-center gap-2 mb-3">
+                <TrendingUp className="w-5 h-5 text-primary" />
+                <h3 className="font-semibold">Your Talent Snapshot</h3>
+              </div>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Talent Rank:</span>
+                  <Badge variant="default" className="font-mono">#{myTeamStrength.talent_rank} / {strengthData.total_rosters}</Badge>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Starters:</span>
+                  <span className="font-mono font-medium">{myTeamStrength.starters_value.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Bench:</span>
+                  <span className="font-mono font-medium">{myTeamStrength.bench_value.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Picks:</span>
+                  <span className="font-mono font-medium">{myTeamStrength.picks_total.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Total:</span>
+                  <span className="font-mono font-bold">{myTeamStrength.total_assets.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Coverage:</span>
+                  <span className="font-mono">{myTeamStrength.coverage_pct}%</span>
+                </div>
+              </div>
+            </Card>
+          )}
+          
+          {sortedTeams.map((team: Team) => {
             const isCurrentUser = username && team.display_name?.toLowerCase() === username.toLowerCase();
             const isExpanded = expandedTeams.has(team.roster_id);
             
@@ -278,7 +351,7 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
                             <div className="flex items-center gap-1 justify-end">
                               <span className="text-xs text-muted-foreground">Rank</span>
                               <Badge variant="default" className="font-mono text-xs" data-testid={`text-rank-${team.roster_id}`}>
-                                #{teamStrength.asset_rank}
+                                #{teamStrength.talent_rank}
                               </Badge>
                             </div>
                             <div className="text-xs text-muted-foreground font-mono">
@@ -390,19 +463,19 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
                                     </Badge>
                                   )}
                                   
-                                  {mv && (mv.fp_rank || mv.trade_value) && (
-                                    <div className="flex flex-col gap-0.5 text-xs text-muted-foreground mt-1">
-                                      {mv.fp_rank && (
-                                        <div className="flex items-center gap-1">
-                                          <Hash className="w-3 h-3 shrink-0" />
-                                          <span>FP Rank:</span>
-                                          <span className="font-mono font-medium">{mv.fp_rank}</span>
-                                        </div>
-                                      )}
-                                      {mv.trade_value != null && (
-                                        <div className="flex items-center gap-1">
-                                          <TrendingUp className="w-3 h-3 shrink-0" />
-                                          <span>Value:</span>
+                                  <div className="flex flex-col gap-0.5 text-xs text-muted-foreground mt-1">
+                                    {mv?.fp_rank && (
+                                      <div className="flex items-center gap-1">
+                                        <Hash className="w-3 h-3 shrink-0" />
+                                        <span>FP Rank:</span>
+                                        <span className="font-mono font-medium">{mv.fp_rank}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex items-center gap-1">
+                                      <TrendingUp className="w-3 h-3 shrink-0" />
+                                      <span>Value:</span>
+                                      {mv?.has_value ? (
+                                        <>
                                           <span className="font-mono font-medium">{mv.trade_value}</span>
                                           {valueDelta && (
                                             <span className={`flex items-center ${valueDelta.color}`}>
@@ -410,10 +483,14 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
                                               <span className="text-xs">{valueDelta.text}</span>
                                             </span>
                                           )}
-                                        </div>
+                                        </>
+                                      ) : (
+                                        <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-600">
+                                          Look to upgrade
+                                        </Badge>
                                       )}
                                     </div>
-                                  )}
+                                  </div>
                                 </div>
                               );
                             })}
