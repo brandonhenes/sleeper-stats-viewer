@@ -79,6 +79,31 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 17, 2026 (Power Rankings for Profile Tiles)
+**Power Module** (`server/analytics/power.ts`):
+- Reusable power computation module for league-level team strength analysis
+- Computes starters value, bench value (0.30 weight), and draft pick value with year discounts
+- Year discounts: 0% (current), 15% (Y+1), 28% (Y+2), 38% (Y+3+)
+- Pick tier valuation: 1.01-1.03, 1.04-1.06, 1.07-1.12 for round 1; early/late for rounds 2-3
+- Fallback DEFAULT_PICK_VALUES when cache lookup fails
+- Returns: rank, outOf, starters, bench, picksCount, picksValue, total, coveragePct, lowConfidence, formatFlags
+
+**Schema Updates** (`shared/schema.ts`):
+- Added `powerRankingSchema` with rank, outOf, starters, bench, picksCount, picksValue, total, coveragePct, lowConfidence, formatFlags
+- Added `power` field to `leagueGroupSchema` for profile tiles
+- Added `PowerRanking` type export
+
+**Overview API Enhancement**:
+- `buildLeagueGroups()` now computes power ranking for each league group's latest league
+- Power data included in overview response for profile tiles
+
+**Profile Page Enhancements**:
+- LeagueCard displays power section with rank badge, starters value, picks count + value, and total
+- Low-confidence indicator (AlertCircle icon) for coverage < 70%
+- Rank badge color varies by percentile (default=top 3, secondary=top 50%, outline=bottom)
+- Cards sorted by power.rank (best first), with low-confidence tiles at bottom
+- `sortedFilteredGroups` memo handles the sorting logic
+
 ### January 17, 2026 (Group Analytics & Profile Table View)
 **New API Endpoint**:
 - `GET /api/group-analytics?username=<username>&season=<season>`: Computes talent analytics for all league groups

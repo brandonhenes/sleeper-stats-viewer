@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Trophy, Users, Calendar, ArrowRightLeft, Target, TrendingUp, Hash } from "lucide-react";
+import { Trophy, Users, Calendar, ArrowRightLeft, Target, TrendingUp, Hash, Zap, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import type { LeagueGroup } from "@shared/schema";
 import { TradeTargetsModal } from "./TradeTargetsModal";
@@ -134,6 +134,45 @@ export function LeagueGroupCard({ group, index, username, selectedSeason }: Leag
                   ))}
                 </div>
               ) : null}
+
+              {group.power && (
+                <div className="pt-3 border-t border-border/50" data-testid={`power-section-${group.group_id}`}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <span className="text-sm font-medium text-foreground">Power</span>
+                      {group.power.lowConfidence && (
+                        <span title="Low data coverage">
+                          <AlertCircle className="w-3 h-3 text-amber-500" />
+                        </span>
+                      )}
+                    </div>
+                    <Badge 
+                      variant={group.power.rank <= 3 ? "default" : group.power.rank <= Math.ceil(group.power.outOf / 2) ? "secondary" : "outline"}
+                      className="gap-1 font-mono"
+                      data-testid={`badge-power-rank-${group.group_id}`}
+                    >
+                      #{group.power.rank}/{group.power.outOf}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-secondary/30 rounded-md p-1.5">
+                      <div className="text-muted-foreground">Starters</div>
+                      <div className="font-bold text-foreground">{group.power.starters.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-secondary/30 rounded-md p-1.5">
+                      <div className="text-muted-foreground">Picks</div>
+                      <div className="font-bold text-foreground">
+                        {group.power.picksCount} ({group.power.picksValue.toLocaleString()})
+                      </div>
+                    </div>
+                    <div className="bg-secondary/30 rounded-md p-1.5">
+                      <div className="text-muted-foreground">Total</div>
+                      <div className="font-bold text-foreground">{group.power.total.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {group.trade_summary && group.trade_summary.trade_count > 0 && (
                 <div className="pt-3 border-t border-border/50 space-y-1">

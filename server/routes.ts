@@ -3,12 +3,13 @@ import { createServer, type Server } from "http";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { cache, type SyncJob } from "./cache";
-import type { LeagueGroup } from "@shared/schema";
+import type { LeagueGroup, PowerRanking } from "@shared/schema";
 import { leagueSummarySchema } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { getStorageMode } from "./db";
 import { importMarketValues } from "./marketValues/importMarketValues";
 import { importFromAttachedAsset as importPickValuesFromCSV } from "./marketValues/importDraftPickValues";
+import { getUserPowerForLeague } from "./analytics/power";
 
 const BASE = "https://api.sleeper.app/v1";
 
@@ -450,6 +451,28 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       league_id: l.league_id,
     }));
 
+    // Compute power ranking for the latest league
+    let power: PowerRanking | null = null;
+    try {
+      const powerResult = await getUserPowerForLeague(latestLeague.league_id, userId);
+      if (powerResult) {
+        power = {
+          rank: powerResult.rank,
+          outOf: powerResult.outOf,
+          starters: powerResult.starters,
+          bench: powerResult.bench,
+          picksCount: powerResult.picksCount,
+          picksValue: powerResult.picksValue,
+          total: powerResult.total,
+          coveragePct: powerResult.coveragePct,
+          lowConfidence: powerResult.lowConfidence,
+          formatFlags: powerResult.formatFlags,
+        };
+      }
+    } catch (e) {
+      console.warn(`[buildLeagueGroups] Power computation failed for ${latestLeague.league_id}:`, e);
+    }
+
     result.push({
       group_id: groupId,
       name: groupLeagues[0].name, // most recent season name
@@ -464,6 +487,7 @@ async function buildLeagueGroups(userId: string): Promise<LeagueGroup[]> {
       trade_summary: tradeSummary,
       placement,
       seasons_to_league: seasonsToLeague,
+      power,
     });
   }
 

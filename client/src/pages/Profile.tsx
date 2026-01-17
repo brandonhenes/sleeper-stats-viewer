@@ -240,6 +240,29 @@ export default function Profile() {
     return "bg-red-500/20 text-red-600 dark:text-red-400";
   };
 
+  // Sort cards by power rank (best first), with low-confidence tiles at bottom
+  const sortedFilteredGroups = useMemo(() => {
+    return [...filteredGroups].sort((a, b) => {
+      const aPower = a.power;
+      const bPower = b.power;
+      
+      // No power data goes to bottom
+      if (!aPower && !bPower) return a.name.localeCompare(b.name);
+      if (!aPower) return 1;
+      if (!bPower) return -1;
+      
+      // Low confidence goes to bottom
+      if (aPower.lowConfidence && !bPower.lowConfidence) return 1;
+      if (!aPower.lowConfidence && bPower.lowConfidence) return -1;
+      
+      // Both same confidence: sort by rank (lower is better)
+      if (aPower.rank !== bPower.rank) return aPower.rank - bPower.rank;
+      
+      // Tiebreaker: total value (higher is better)
+      return bPower.total - aPower.total;
+    });
+  }, [filteredGroups]);
+
   return (
     <Layout username={username}>
       <div className="pb-20">
@@ -578,7 +601,7 @@ export default function Profile() {
 
               {displayMode === "cards" && hasLeagues && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredGroups.map((group, idx) => (
+                  {sortedFilteredGroups.map((group, idx) => (
                     <LeagueGroupCard 
                       key={group.group_id} 
                       group={group} 

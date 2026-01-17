@@ -281,6 +281,23 @@ export const seasonLeagueMapSchema = z.object({
   league_id: z.string(),
 });
 
+// Power ranking for profile tiles
+export const powerRankingSchema = z.object({
+  rank: z.number(),
+  outOf: z.number(),
+  starters: z.number(),
+  bench: z.number(),
+  picksCount: z.number(),
+  picksValue: z.number(),
+  total: z.number(),
+  coveragePct: z.number(),
+  lowConfidence: z.boolean(),
+  formatFlags: z.object({
+    superflex: z.boolean(),
+    tep: z.boolean(),
+  }),
+});
+
 export const leagueGroupSchema = z.object({
   group_id: z.string(),
   name: z.string(), // most recent season name
@@ -295,6 +312,7 @@ export const leagueGroupSchema = z.object({
   trade_summary: tradeSummarySchema.nullish(), // trade stats for this group (null in no-db mode)
   placement: seasonPlacementSchema.nullish(), // most recent season placement for display on tile
   seasons_to_league: z.array(seasonLeagueMapSchema).optional(), // season → league_id mapping for navigation
+  power: powerRankingSchema.nullish(), // power ranking for profile tiles
 });
 
 // Original league schema (kept for backwards compatibility)
@@ -397,6 +415,7 @@ export type SleeperUser = z.infer<typeof sleeperUserSchema>;
 export type League = z.infer<typeof leagueSchema>;
 export type LeagueWithRecord = z.infer<typeof leagueWithRecordSchema>;
 export type TradeSummary = z.infer<typeof tradeSummarySchema>;
+export type PowerRanking = z.infer<typeof powerRankingSchema>;
 export type LeagueGroup = z.infer<typeof leagueGroupSchema>;
 export type MyRecord = z.infer<typeof myRecordSchema>;
 export type LeagueUser = z.infer<typeof leagueUserSchema>;

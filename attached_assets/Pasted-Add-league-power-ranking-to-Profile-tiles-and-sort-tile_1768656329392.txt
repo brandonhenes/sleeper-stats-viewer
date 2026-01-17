@@ -1,0 +1,46 @@
+Add league power ranking to Profile tiles and sort tiles by it.
+
+1) Server
+- Extract existing Teams “Talent Snapshot” computation into server/analytics/power.ts so it can be reused across Teams + Profile.
+- Update the Profile overview endpoint that returns league tiles to include:
+  tile.power = {
+    rank, outOf,
+    starters, bench, picksCount,
+    picksValue,
+    total,
+    coveragePct,
+    formatFlags
+  }
+  where these reflect THE USER’S roster for that league + selected season.
+- Cache power results per leagueId+season to avoid slow profile loads.
+- If coveragePct < 70%, mark power as low-confidence.
+
+IMPORTANT — Draft picks MUST be valued, not just counted.
+- Right now Picks shows a count (e.g., “Picks: 14”), but picks are not included in “how good the team is” unless they contribute numeric value to totals/rankings.
+- This means one of these is currently true:
+  a) picks are displayed but NOT added to total, or
+  b) picks are being counted as “number of picks” not “value”, or
+  c) pick assets are not flowing through the same valuation pipeline as players.
+- Fix requirement:
+  - Compute picksValue as a VALUE SUM (numeric) and include it in team totals:
+    total = starters + benchWeight * bench + picksValue
+  - Prefer using existing trade value data for rookie picks if available.
+  - If pick trade values aren’t available, implement a simple v1 pick chart (tunable later):
+    1st = 55, 2nd = 30, 3rd = 15, 4th = 7
+    apply year discount: same year x1.00, +1 year x0.85, +2 years x0.72, +3 years x0.62
+  - picksValue must materially change team total + power rank when picks are traded.
+  - Surface BOTH pick count and pick value in the snapshot:
+    “Picks: 14 (Value: 112)” not just “Picks: 14”.
+
+2) Client
+- On each league tile, display: Power #X/N and Total (and optionally breakdown S/B/P + coverage).
+- Default sort order on Profile is by power.rank ascending (valid only when coverage >= 70%).
+- Tiles with missing/low-confidence power go to bottom with a concise empty state (Sync / change season).
+- In the league Teams list, ensure rows are sorted by power.rank and optionally pin/highlight the user’s team row.
+
+Acceptance
+- Profile tiles show power rank and total for leagues with computed values.
+- Changing season updates displayed power values (no stale season mixups).
+- Tile list sorts strongest leagues to the top by power rank.
+- Picks materially change power totals/rank when traded (not just pick count).
+- No empty panels: hide sections without data or show a single-line empty state with next action.
