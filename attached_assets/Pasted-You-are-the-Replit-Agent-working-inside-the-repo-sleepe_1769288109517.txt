@@ -1,0 +1,304 @@
+You are the Replit Agent working inside the repo “sleeper-stats-viewer” (current state matches the zip in this project). I want an ALL-IN overhaul that optimizes for (1) Power Rankings, (2) Trade Scouting / Trade Finder, and (3) Getting an edge in dynasty using Sleeper’s API data. This is NOT a small sprint. Do a full evaluation of the current codebase and implement the redesign end-to-end.
+
+NON-NEGOTIABLES
+- Do NOT start from scratch. Refactor/extend the existing app.
+- Keep the existing caching/sync architecture (server/cache.ts, DB tables in shared/schema.ts, sync job endpoints in server/routes.ts).
+- Keep “no-db fallback mode” behavior intact (if DB unavailable, app still browses).
+- Everything that shows numbers must be safe (no toFixed crashes / NaN / undefined); use consistent formatting helpers.
+- Anything that’s sortable must be sortable (especially “Buy” columns and rankings tables).
+- Add a debug panel / debug mode to inspect raw inputs + computed outputs (client + server).
+- IMPORTANT ADDITION: Verify whether “draft pick VALUES” (not just ownership) are computed/stored in the database. If not, implement pick value storage and usage. (In the current zip, there is draft pick ownership computation via Sleeper endpoints, but there is no DB table for pick values or a persistent pick ownership table.)
+
+CURRENT CODEBASE REALITY CHECK (from the zip)
+Client:
+- Routes/nav in client/src/components/Layout.tsx + client/src/App.tsx currently show Profile/Players/Scouting/Market/Compare, and LeagueGroupDetails is the league drill-in.
+- LeagueGroupDetails composes ScoutingSection, TeamsSection, TradesSection (client/src/components/*).
+- There is a DebugDrawer already (client/src/components/DebugDrawer.tsx) but it needs to be expanded and made useful.
+
+Server:
+- server/routes.ts is large and contains many endpoints, including:
+  - /api/league/:leagueId/teams (returns rosters + resolved players)
+  - /api/league/:leagueId/draft-capital and /draft-capital/all (ownership computed from /traded_picks)
+  - scouting endpoints for all-play, consistency, churn, trading style, etc.
+- shared/schema.ts includes cache tables (users/leagues/rosters/roster_players/trades/trade_assets/players/etc) BUT DOES NOT include:
+  - a pick ownership cache table (draft_picks_ownership)
+  - player value tables
+  - pick value tables
+So “value ranking” and “pick values” are not actually a first-class concept in the DB yet.
+
+WHAT WE ARE BUILDING (NEW PRODUCT SHAPE)
+Reorganize the app into 2 top-level tabs:
+
+A) “Trophy Room” (fun / backward-looking)
+- Historical finishes per league group, head-to-head, season summaries, market/trade logs, “cool to look at” stats.
+- Keep/repurpose existing pages/components: Profile, Compare, Market, the season summaries endpoints, H2H, etc.
+- This is NOT where decisions happen — it’s the “museum”.
+
+B) “Edge Engine” (forward-looking / decision-making)
+This is the core tab, per-league:
+1) Power Rankings (NOW + FUTURE)
+2) Draft Capital (ownership + VALUE + summary)
+3) Team Needs Engine (who wants points vs youth/picks; by position; with sortable “Buy” columns)
+4) Surplus Finder (my surplus + opponent surplus by position/value)
+5) Trade Finder (propose trades + best counterparties + fair value ranges)
+6) Scouting Intel (keep the good existing scouting tables: all-play/luck, consistency, churn, trading style, etc.)
+7) Value Coverage explanation OR remove it (see below)
+
+Also:
+- “Coverage” must either be clearly explained and renamed (“Value Coverage”) OR removed from the UI. If kept, tooltips + a one-sentence explanation are mandatory.
+
+KEY NEW CAPABILITIES (WHAT’S MISSING TODAY)
+1) VALUE DATA LAYER (FantasyPros trade values import)
+- I want a value ranking system based on FantasyPros trade values that I can import periodically.
+- Implement a “Value Library” feature:
+  - Admin UI: paste CSV / upload CSV/JSON.
+  - Server parses it, maps to Sleeper player_id (by name/team/pos; support manual overrides).
+  - Store in DB with source + timestamp.
+  - Include pick values too (e.g., “2026 1st”, “2027 2nd”) as a normalized table.
+- Must support dynasty positions and picks.
+- Must provide “Value Coverage”: % of roster assets that have a value entry.
+  - This is what “coverage” should mean if it stays.
+  - Coverage = (valued players + valued picks) / (total players + total picks considered), shown per team and overall.
+
+2) DRAFT PICKS (ownership + STORAGE + SUMMARY + VALUE)
+The app must correctly show draft picks for ALL TEAMS, not just me, and it must match reality (example: my team in “Reckless Abandon” has 4 firsts).
+Implement:
+- Correct pick ownership computation for all rosters:
+  - Use Sleeper /league/:leagueId/traded_picks.
+  - Baseline: each roster owns its own picks for the target years/rounds.
+  - Apply traded picks to update ownership.
+- Add persistent storage:
+  - Create DB tables:
+    a) draft_picks_ownership:
+       - league_id
+       - season (int)
+       - round (int)
+       - original_roster_id (int)
+       - owner_roster_id (int)
+       - updated_at
+       - unique key on (league_id, season, round, original_roster_id)
+    b) pick_values:
+       - key format OR normalized fields:
+         - season_offset or season (int)
+         - round (int)
+         - value (float/int)
+         - source (text)
+         - updated_at
+- Add endpoints:
+  - GET /api/league/:leagueId/draft-picks (owned picks detailed per roster)
+  - GET /api/league/:leagueId/draft-picks/summary (counts + total pick value per roster)
+  - POST /api/values/import (player + pick values)
+- UI:
+  - In Edge Engine, show a Draft Picks Summary table:
+    - Team | 1sts | 2nds | 3rds | 4ths | Total Pick Value | Notes (optional)
+    - Sortable columns.
+  - In Teams view, allow expanding a team to see each pick (year/round/original/current owner/value).
+
+IMPORTANT CHECK (explicit requirement):
+- Inspect the DB schema and code paths to confirm whether pick values are computed/stored today.
+- If they are NOT (expected in zip), implement the tables + import + usage.
+
+3) POWER RANKINGS (with starter-heavy weighting)
+Implement “Power Rankings” for each league using Sleeper league settings + my imported values.
+- Must split value into:
+  - Starters Value (optimal lineup value)
+  - Bench Value
+  - Picks Value
+  - Depth/Fragility score (or similar)
+  - Age/Window score (position-specific)
+- Weighting (user preference):
+  - 45 / 15 / 15 / 20 / 5
+  - Default mapping:
+    - 45% Starters Value (optimal lineup)
+    - 15% Bench Value
+    - 15% Picks Value
+    - 20% Depth / Fragility (how “replaceable” starters are + how many startable assets you have)
+    - 5% Age/Window Score
+- These weights must be editable in UI (sliders or inputs) and persisted in localStorage.
+
+CRITICAL: Starters Value must not be “who was started last week”.
+- Compute “optimal lineup” using roster positions (league roster_positions) and player positions:
+  - Implement a lineup optimizer that assigns the highest-value players to valid starting slots (QB/RB/WR/TE/FLEX/SUPER_FLEX etc).
+  - Treat FLEX as RB/WR/TE; treat SUPER_FLEX as QB/RB/WR/TE.
+  - Exclude BN/IR/TAXI from starting slots.
+- Output:
+  - “Max Lineup Value” (this is the “Max of rank” concept).
+  - “Starter Core Value” (sum of assigned starters).
+  - “Bench Value” = total player value - starter core value.
+
+4) AGE CURVES (position-specific) + WINDOW SCORE
+I want age curve split by position because each position has a different prime window.
+- Implement default prime ages:
+  - RB prime ~24 (peak), WR prime ~26–27, TE prime ~27–29, QB prime ~28–32 (use a reasonable curve)
+- For each roster:
+  - Calculate weighted average age by position of “relevant assets” (starters + top bench at that position).
+  - Compute “Window Score” that rewards being in/near prime for a contender OR being young + pick-rich for a rebuild.
+- UI:
+  - Show per-team age curve breakdown (mini table or tooltip):
+    - QB age score | RB age score | WR age score | TE age score
+  - Window Score should be visible and sortable.
+
+5) TEAM NEEDS ENGINE (this is a keeper)
+User likes this a lot: “who wants points vs youth/picks”, plus needs by position.
+Implement:
+- Determine team archetype:
+  - Contender (wants points now)
+  - Rebuilder (wants youth/picks)
+  - Tweener (needs direction)
+- Inputs:
+  - Starters Value rank
+  - Picks Value rank
+  - Age/Window Score
+  - Optional: trading style (from scouting/trading endpoint) to label “likely to trade”
+- Determine positional needs:
+  - Compare optimal lineup composition vs depth.
+  - Identify weakest starting slot and shallowest position groups.
+- UI:
+  - Table with sortable “Buy” columns:
+    - “Buy Points” (teams that should buy veterans/production)
+    - “Buy Youth/Picks” (teams that should buy youth/picks)
+    - “Sell Points” (teams likely to sell vets)
+  - Tooltips explaining each.
+
+6) SURPLUS + TRADE FINDER (must keep and expand)
+User said “Surplus is genius” and wants trade discovery for an edge.
+Implement:
+- For each roster:
+  - Surplus players by position (assets above what’s needed to fill optimal lineup + a depth threshold).
+  - Deficits by position.
+- For ME:
+  - “My Surplus” panel:
+    - list of tradable assets ranked by (surplus amount * value)
+  - “Trade Partners” panel:
+    - ranks opponents by fit:
+      - They need what I have surplus in
+      - They have picks/youth I want (or points I want)
+      - Their trading style suggests they’re active
+- Trade Finder output:
+  - Generate 5–20 candidate deals:
+    - Player-for-pick
+    - 2-for-1 consolidation
+    - Rebalance trades (points ↔ youth/picks)
+  - For each candidate deal:
+    - side A assets + value
+    - side B assets + value
+    - delta (should be near 0; allow configurable +/- tolerance)
+    - rationale (“you are surplus at WR; they are deficit; they have extra 2nds”)
+- Keep existing TradeTargetsModal concept if useful, but refocus it per LEAGUE and per TEAM NEEDS (not only cross-league exposure).
+
+7) “COVERAGE” (explain or remove)
+Coverage currently confuses the user.
+- Either remove it completely,
+- OR rename to “Value Coverage” and define it precisely:
+  - “% of your roster (players + picks) that has a known imported value”
+- If kept:
+  - Show it as a % with a tooltip.
+  - Provide a warning if coverage is low (“import values to improve accuracy”).
+
+8) SAFETY FOR NUMBER FIELDS (no crashes)
+- Create shared formatting helpers in client:
+  - fmtNum(x, decimals=0)
+  - fmtMoney(x)
+  - fmtPct(x)
+- Replace all direct toFixed() usage with safe formatters.
+- Server must also validate numeric inputs and avoid NaN outputs.
+
+9) DEBUG PANEL FOR TESTING (must-have)
+- Implement a Debug mode toggle:
+  - query param ?debug=1 enables:
+    - showing raw API payloads for league, rosters, picks, values
+    - showing intermediate computed objects (lineup assignment, value coverage, window score)
+- Extend existing DebugDrawer to:
+  - choose a roster
+  - view: “players + values”, “assigned starters”, “pick ownership list”, “computed scores”
+
+IMPLEMENTATION PLAN (DO THIS IN ORDER, BUT IT’S ONE OVERHAUL)
+Phase 0 — Baseline & inventory
+- Pull latest repo state, install deps, run dev server.
+- Enumerate current routes/pages and verify what exists vs what’s referenced.
+- Identify current breakpoints/bugs (including any toFixed crashes).
+
+Phase 1 — Data model upgrades (DB)
+- Update shared/schema.ts to add:
+  - player_values table
+  - pick_values table
+  - draft_picks_ownership table
+  - optional: roster_value_snapshots (for caching computed scores)
+- Run drizzle push (npm run db:push) and verify tables exist.
+- Add cache methods in server/cache.ts for reading/writing these.
+
+Phase 2 — Values import pipeline
+- Add server endpoint to ingest pasted CSV/JSON and store values.
+- Implement robust player matching:
+  - start with direct player_id if provided,
+  - else match by full_name + position + team,
+  - allow a manual overrides map stored server-side.
+- Add client UI in Edge Engine “Value Library”:
+  - paste area + preview + import button
+  - show last updated timestamp + coverage estimates.
+
+Phase 3 — Draft pick ownership + summary + value
+- Implement pick ownership computation for ALL teams.
+- Persist to draft_picks_ownership with TTL refresh (or refresh on sync).
+- Add pick summary endpoint and UI.
+- Validate against known reality:
+  - In “Reckless Abandon”, my roster should show 4 firsts (or whatever the API truth is).
+
+Phase 4 — Power Rankings engine
+- Parse league roster_positions from leagues.raw_json (or fetch league settings if missing).
+- Build lineup optimizer (max value lineup) and compute:
+  - starters_value
+  - bench_value
+  - picks_value
+  - depth/fragility
+  - age/window score (position-specific)
+  - composite score with editable weights (45/15/15/20/5 default)
+- Add endpoint: GET /api/league/:leagueId/power-rankings
+- Add Edge Engine UI table:
+  - sortable columns
+  - click team => details: assigned starters, bench, picks list, age breakdown.
+
+Phase 5 — Team Needs + Surplus + Trade Finder
+- Implement team archetype + positional needs.
+- Implement surplus/deficit engine.
+- Implement trade candidate generator with value balancing.
+- Add UI panels:
+  - “My surplus”
+  - “Best trade partners”
+  - “Suggested trades”
+  - Keep existing scouting intel tables under Edge Engine.
+
+Phase 6 — Reorg UI into 2 tabs
+- Top nav becomes:
+  - Trophy Room
+  - Edge Engine
+  - (Optional) Settings/Import
+- Trophy Room reuses existing historical pages.
+- Edge Engine is league-focused and contains the decision tools.
+
+Phase 7 — Hardening + Debug
+- Add number safety everywhere.
+- Expand DebugDrawer.
+- Add basic tests for lineup optimizer + pick ownership.
+
+ACCEPTANCE CRITERIA (MUST PASS)
+- Edge Engine exists and is usable on mobile + desktop.
+- Draft picks are correct for all teams (not just mine), and are visible in a summary table.
+- Draft pick VALUES exist and are used (picks_value is not always 0 unless no values imported).
+- Power Rankings show starters-heavy scoring and are sortable.
+- Age curves are position-specific and visible.
+- Team Needs Engine labels “wants points vs youth/picks” correctly and is sortable.
+- Trade Finder produces candidate trades using surplus/needs and value balancing.
+- Coverage is either removed or clearly defined as Value Coverage.
+- Debug mode shows raw + computed data and helps verify correctness.
+- No number formatting crashes (no toFixed on undefined/NaN).
+
+DELIVERABLES
+- Updated schema + working DB migrations via drizzle push
+- New/updated API endpoints
+- New Edge Engine UI
+- Reorganized navigation
+- Debug tools
+- Notes in README: how to import values, what coverage means, how power ranking is computed
+
+Now implement it. Do not stop at a task list — execute the overhaul.
