@@ -194,6 +194,20 @@ export const draft_pick_values = pgTable("draft_pick_values", {
   uniqueIndex("idx_pick_values_unique").on(table.pick_year, table.pick_round, table.pick_tier),
 ]);
 
+// Draft capital cache: stores computed pick ownership per roster
+export const draft_capital_cache = pgTable("draft_capital_cache", {
+  id: serial("id").primaryKey(),
+  league_id: text("league_id").notNull(),
+  roster_id: integer("roster_id").notNull(),
+  season_year: integer("season_year").notNull(),
+  round: integer("round").notNull(),
+  count: integer("count").notNull().default(0),
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_draft_capital_league").on(table.league_id),
+  uniqueIndex("idx_draft_capital_unique").on(table.league_id, table.roster_id, table.season_year, table.round),
+]);
+
 // User exposure summary for trade targeting
 // Caches each user's player exposure across their active leagues
 export const user_exposure_summary = pgTable("user_exposure_summary", {

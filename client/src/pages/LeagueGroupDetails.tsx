@@ -448,12 +448,16 @@ export default function LeagueGroupDetails() {
                         </Table>
                         <div className="mt-4 pt-4 border-t border-border/50 flex items-center justify-between gap-4 flex-wrap">
                           <div>
-                            <div className="text-sm text-muted-foreground">Total Picks</div>
-                            <div className="text-xl font-bold font-mono">{draftCapitalData.totals.total}</div>
+                            <div className="text-sm text-muted-foreground">Future 1sts (3y)</div>
+                            <div className="text-xl font-bold font-mono">{draftCapitalData.future_1sts ?? draftCapitalData.totals?.r1 ?? 0}</div>
                           </div>
                           <div>
-                            <div className="text-sm text-muted-foreground">Hoard Index</div>
-                            <div className="text-xl font-bold font-mono">{draftCapitalData.pick_hoard_index}</div>
+                            <div className="text-sm text-muted-foreground">Total Picks</div>
+                            <div className="text-xl font-bold font-mono">{draftCapitalData.totals?.total ?? 0}</div>
+                          </div>
+                          <div>
+                            <div className="text-sm text-muted-foreground">DraftCap Score</div>
+                            <div className="text-xl font-bold font-mono">{(draftCapitalData.draft_cap_score ?? draftCapitalData.pick_hoard_index ?? 0).toFixed(1)}</div>
                           </div>
                         </div>
                       </>
@@ -461,6 +465,28 @@ export default function LeagueGroupDetails() {
 
                     {!draftCapitalLoading && !draftCapitalData && (
                       <p className="text-sm text-muted-foreground text-center py-4">No draft capital data available</p>
+                    )}
+                    
+                    {isDebug && draftCapitalData?.debug && (
+                      <div className="mt-4 p-3 bg-muted/50 rounded-md text-xs font-mono" data-testid="debug-draft-capital">
+                        <div className="font-bold mb-2 text-primary">Debug Info</div>
+                        <div>League ID: {activeLeagueId}</div>
+                        <div>Season: {displayedSeason}</div>
+                        <div>Baseline Years: {draftCapitalData.debug.baseline_years?.join(", ") ?? "N/A"}</div>
+                        <div>Baseline Rounds: {draftCapitalData.debug.baseline_rounds ?? "N/A"}</div>
+                        <div>Baseline Picks Created: {draftCapitalData.debug.baseline_picks_created ?? "N/A"}</div>
+                        <div>Traded Picks Applied: {draftCapitalData.debug.traded_picks_applied ?? "N/A"}</div>
+                        <div>My Roster ID: {draftCapitalData.debug.my_roster_id ?? draftCapitalData.roster_id ?? "N/A"}</div>
+                        <div className="mt-2 border-t border-border/50 pt-2">
+                          <div>Computed Totals:</div>
+                          <div className="pl-2">
+                            1sts: {draftCapitalData.totals?.r1 ?? 0} | 
+                            2nds: {draftCapitalData.totals?.r2 ?? 0} | 
+                            3rds: {draftCapitalData.totals?.r3 ?? 0} | 
+                            4ths: {draftCapitalData.totals?.r4 ?? 0}
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </Card>
 

@@ -2653,13 +2653,13 @@ export async function registerRoutes(
   app.get("/api/league/:leagueId/draft-capital", async (req, res) => {
     const { leagueId } = req.params;
     const username = req.query.username as string;
+    const includeDebug = req.query.debug === "1";
 
     if (!username) {
       return res.status(400).json({ message: "Missing username" });
     }
 
     try {
-      // Get user and rosters to find their roster_id
       const cachedUser = await cache.getUserByUsername(username);
       if (!cachedUser) {
         return res.status(404).json({ message: "User not found" });
@@ -2672,130 +2672,30 @@ export async function registerRoutes(
         return res.status(404).json({ message: "User not in this league" });
       }
 
-      const userRosterId = userRoster.roster_id;
-      const totalRosters = rosters.length;
-
-      // Fetch traded picks from Sleeper API
-      const tradedPicks = await getTradedPicks(leagueId) as Array<{
-        season: string;
-        round: number;
-        roster_id: number;
-        previous_owner_id: number;
-        owner_id: number;
-      }> | null;
-
-      // Get league season to determine baseline years
-      const league = await cache.getLeagueById(leagueId);
-      const currentSeason = league?.season ?? new Date().getFullYear();
+      const { computeDraftCapital } = await import("./analytics/draftCapital");
+      const result = await computeDraftCapital(leagueId, includeDebug);
       
-      // Always generate baseline years: current season + 2 future years
-      const baselineYears = [
-        String(currentSeason),
-        String(currentSeason + 1),
-        String(currentSeason + 2),
-      ];
-      
-      // Also include any years from traded picks data
-      const yearsFromData = new Set<string>(baselineYears);
-      if (tradedPicks && Array.isArray(tradedPicks)) {
-        for (const pick of tradedPicks) {
-          yearsFromData.add(pick.season);
-        }
-      }
-      
-      // Sort years (only future years from baseline onwards)
-      const years = Array.from(yearsFromData)
-        .filter(y => parseInt(y, 10) >= currentSeason)
-        .sort();
-      const rounds = [1, 2, 3, 4];
-
-      // Track user's picks: acquired and traded away
-      const userPicks: Array<{ year: string; round: number; originalOwner: number }> = [];
-      const tradedAwayPicks: Array<{ year: string; round: number; newOwner: number }> = [];
-
-      if (tradedPicks && Array.isArray(tradedPicks)) {
-        for (const pick of tradedPicks) {
-          // If user is the new owner (acquired pick from another roster)
-          if (pick.owner_id === userRosterId && pick.roster_id !== userRosterId) {
-            userPicks.push({
-              year: pick.season,
-              round: pick.round,
-              originalOwner: pick.roster_id,
-            });
-          }
-          // If user was previous owner and no longer owns (traded away)
-          if (pick.previous_owner_id === userRosterId && pick.owner_id !== userRosterId) {
-            tradedAwayPicks.push({
-              year: pick.season,
-              round: pick.round,
-              newOwner: pick.owner_id,
-            });
-          }
-        }
+      if (!result) {
+        return res.status(404).json({ message: "Could not compute draft capital" });
       }
 
-      // Calculate user's picks by year/round based on trade activity
-      // For each year, start with 1 (own pick) then adjust based on trades
-      const ownedPicks: Record<string, Record<number, number>> = {};
-      for (const year of years) {
-        ownedPicks[year] = {};
-        for (const round of rounds) {
-          // Start with 1 (user's own pick for this round)
-          ownedPicks[year][round] = 1;
-        }
+      const userCapital = result.rosters.find(r => r.roster_id === userRoster.roster_id);
+      if (!userCapital) {
+        return res.status(404).json({ message: "User roster not found in draft capital" });
       }
-
-      // Add acquired picks (picks traded TO user)
-      for (const pick of userPicks) {
-        if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
-          ownedPicks[pick.year][pick.round]++;
-        }
-      }
-
-      // Remove traded away picks (user's picks traded away)
-      for (const pick of tradedAwayPicks) {
-        if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
-          ownedPicks[pick.year][pick.round]--;
-        }
-      }
-
-      // Calculate totals (only for years with actual data)
-      let totalR1 = 0, totalR2 = 0, totalR3 = 0, totalR4 = 0;
-      for (const year of years) {
-        totalR1 += Math.max(0, ownedPicks[year][1] || 0);
-        totalR2 += Math.max(0, ownedPicks[year][2] || 0);
-        totalR3 += Math.max(0, ownedPicks[year][3] || 0);
-        totalR4 += Math.max(0, ownedPicks[year][4] || 0);
-      }
-      const totalPicks = totalR1 + totalR2 + totalR3 + totalR4;
-
-      // Pick Hoard Index: weighted sum of round 1-2 picks
-      const pickHoardIndex = totalR1 * 2 + totalR2;
-
-      const debug = req.query.debug === "1" ? {
-        baseline_years: baselineYears,
-        years_shown: years,
-        current_season: currentSeason,
-        traded_picks_count: tradedPicks?.length || 0,
-      } : undefined;
 
       res.json({
         league_id: leagueId,
         username,
-        roster_id: userRosterId,
-        picks_by_year: ownedPicks,
-        totals: {
-          r1: totalR1,
-          r2: totalR2,
-          r3: totalR3,
-          r4: totalR4,
-          total: totalPicks,
-        },
-        pick_hoard_index: pickHoardIndex,
-        acquired_picks: userPicks,
-        traded_away_picks: tradedAwayPicks,
+        roster_id: userRoster.roster_id,
+        picks_by_year: userCapital.picks_by_year,
+        totals: userCapital.totals,
+        draft_cap_score: userCapital.draft_cap_score,
+        future_1sts: userCapital.future_1sts,
+        acquired_count: userCapital.acquired_count,
+        traded_away_count: userCapital.traded_away_count,
         baseline_years_used: true,
-        ...(debug && { debug }),
+        ...(result.debug && { debug: { ...result.debug, my_roster_id: userRoster.roster_id } }),
       });
     } catch (e) {
       console.error("Draft capital error:", e);
@@ -3209,123 +3109,25 @@ export async function registerRoutes(
   // ============================================================================
 
   // GET /api/league/:leagueId/scouting/draft-capital
-  // Returns draft capital for ALL rosters in the league with Pick Hoard Index
+  // Returns draft capital for ALL rosters in the league with DraftCap Score
   app.get("/api/league/:leagueId/scouting/draft-capital", async (req, res) => {
     const { leagueId } = req.params;
+    const includeDebug = req.query.debug === "1";
 
     try {
-      const rosters = await cache.getRostersForLeague(leagueId);
-      if (!rosters || rosters.length === 0) {
+      const { computeDraftCapital, cacheDraftCapital } = await import("./analytics/draftCapital");
+      
+      const result = await computeDraftCapital(leagueId, includeDebug);
+      if (!result) {
         return res.status(404).json({ message: "League not found or has no rosters" });
       }
 
-      // Get league users for display names
-      const leagueUsers = await cache.getLeagueUsers(leagueId);
-      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
-
-      // Fetch traded picks from Sleeper API
-      const tradedPicks = await getTradedPicks(leagueId) as Array<{
-        season: string;
-        round: number;
-        roster_id: number;
-        previous_owner_id: number;
-        owner_id: number;
-      }> | null;
-
-      // Extract unique years from traded picks data
-      const yearsFromData = new Set<string>();
-      if (tradedPicks && Array.isArray(tradedPicks)) {
-        for (const pick of tradedPicks) {
-          yearsFromData.add(pick.season);
-        }
-      }
-      const years = Array.from(yearsFromData).sort();
-      const rounds = [1, 2, 3, 4];
-
-      // Calculate draft capital for each roster
-      const rosterCapital: Array<{
-        roster_id: number;
-        owner_id: string | null;
-        display_name: string;
-        picks_by_year: Record<string, Record<number, number>>;
-        totals: { r1: number; r2: number; r3: number; r4: number; total: number };
-        pick_hoard_index: number;
-        acquired_count: number;
-        traded_away_count: number;
-      }> = [];
-
-      for (const roster of rosters) {
-        const rosterId = roster.roster_id;
-        const user = userMap.get(roster.owner_id || "");
-
-        // Track picks for this roster
-        const acquiredPicks: Array<{ year: string; round: number }> = [];
-        const tradedAwayPicks: Array<{ year: string; round: number }> = [];
-
-        if (tradedPicks && Array.isArray(tradedPicks)) {
-          for (const pick of tradedPicks) {
-            // Acquired: user is owner but not the original roster
-            if (pick.owner_id === rosterId && pick.roster_id !== rosterId) {
-              acquiredPicks.push({ year: pick.season, round: pick.round });
-            }
-            // Traded away: user was previous owner but no longer owns
-            if (pick.previous_owner_id === rosterId && pick.owner_id !== rosterId) {
-              tradedAwayPicks.push({ year: pick.season, round: pick.round });
-            }
-          }
-        }
-
-        // Calculate owned picks by year/round
-        const ownedPicks: Record<string, Record<number, number>> = {};
-        for (const year of years) {
-          ownedPicks[year] = {};
-          for (const round of rounds) {
-            ownedPicks[year][round] = 1; // Start with own pick
-          }
-        }
-
-        for (const pick of acquiredPicks) {
-          if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
-            ownedPicks[pick.year][pick.round]++;
-          }
-        }
-        for (const pick of tradedAwayPicks) {
-          if (ownedPicks[pick.year] && ownedPicks[pick.year][pick.round] !== undefined) {
-            ownedPicks[pick.year][pick.round]--;
-          }
-        }
-
-        // Calculate totals
-        let totalR1 = 0, totalR2 = 0, totalR3 = 0, totalR4 = 0;
-        for (const year of years) {
-          totalR1 += Math.max(0, ownedPicks[year][1] || 0);
-          totalR2 += Math.max(0, ownedPicks[year][2] || 0);
-          totalR3 += Math.max(0, ownedPicks[year][3] || 0);
-          totalR4 += Math.max(0, ownedPicks[year][4] || 0);
-        }
-        const totalPicks = totalR1 + totalR2 + totalR3 + totalR4;
-        const pickHoardIndex = totalR1 * 2 + totalR2;
-
-        rosterCapital.push({
-          roster_id: rosterId,
-          owner_id: roster.owner_id,
-          display_name: user?.display_name || `Team ${rosterId}`,
-          picks_by_year: ownedPicks,
-          totals: { r1: totalR1, r2: totalR2, r3: totalR3, r4: totalR4, total: totalPicks },
-          pick_hoard_index: pickHoardIndex,
-          acquired_count: acquiredPicks.length,
-          traded_away_count: tradedAwayPicks.length,
-        });
-      }
-
-      // Sort by pick hoard index descending
-      rosterCapital.sort((a, b) => b.pick_hoard_index - a.pick_hoard_index);
+      cacheDraftCapital(leagueId).catch(err => {
+        console.warn("Failed to cache draft capital:", err);
+      });
 
       res.json({
-        league_id: leagueId,
-        years,
-        rounds,
-        rosters: rosterCapital,
+        ...result,
         scope: "snapshot",
         scope_label: "Latest League Only",
       });

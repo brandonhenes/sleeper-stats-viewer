@@ -107,17 +107,19 @@ export function ScoutingSection({ leagueId, username }: ScoutingSectionProps) {
                       <TableRow>
                         <TableHead className="w-10">#</TableHead>
                         <TableHead>Team</TableHead>
+                        <TableHead className="text-center">Future 1sts</TableHead>
                         <TableHead className="text-center">R1</TableHead>
                         <TableHead className="text-center">R2</TableHead>
                         <TableHead className="text-center">R3</TableHead>
                         <TableHead className="text-center">R4</TableHead>
                         <TableHead className="text-center">Total</TableHead>
-                        <TableHead className="text-center">Hoard Index</TableHead>
+                        <TableHead className="text-center">DraftCap Score</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {draftCapitalData.rosters?.map((roster: any, idx: number) => {
                         const isCurrentUser = username && roster.display_name?.toLowerCase() === username.toLowerCase();
+                        const draftCapScore = roster.draft_cap_score ?? (roster.pick_hoard_index ?? 0);
                         return (
                           <TableRow 
                             key={roster.roster_id} 
@@ -126,14 +128,19 @@ export function ScoutingSection({ leagueId, username }: ScoutingSectionProps) {
                           >
                             <TableCell className="font-mono text-muted-foreground">{idx + 1}</TableCell>
                             <TableCell className="font-medium">{roster.display_name}</TableCell>
-                            <TableCell className="text-center font-mono">{roster.totals?.r1 || 0}</TableCell>
-                            <TableCell className="text-center font-mono">{roster.totals?.r2 || 0}</TableCell>
-                            <TableCell className="text-center font-mono">{roster.totals?.r3 || 0}</TableCell>
-                            <TableCell className="text-center font-mono">{roster.totals?.r4 || 0}</TableCell>
-                            <TableCell className="text-center font-mono font-bold">{roster.totals?.total || 0}</TableCell>
                             <TableCell className="text-center">
-                              <Badge variant={roster.pick_hoard_index > 4 ? "default" : "outline"}>
-                                {roster.pick_hoard_index}
+                              <Badge variant={(roster.future_1sts ?? roster.totals?.r1 ?? 0) >= 4 ? "default" : "outline"}>
+                                {roster.future_1sts ?? roster.totals?.r1 ?? 0}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center font-mono">{roster.totals?.r1 ?? 0}</TableCell>
+                            <TableCell className="text-center font-mono">{roster.totals?.r2 ?? 0}</TableCell>
+                            <TableCell className="text-center font-mono">{roster.totals?.r3 ?? 0}</TableCell>
+                            <TableCell className="text-center font-mono">{roster.totals?.r4 ?? 0}</TableCell>
+                            <TableCell className="text-center font-mono font-bold">{roster.totals?.total ?? 0}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant={draftCapScore >= 12 ? "default" : draftCapScore >= 6 ? "secondary" : "outline"}>
+                                {draftCapScore.toFixed(1)}
                               </Badge>
                             </TableCell>
                           </TableRow>
@@ -143,7 +150,7 @@ export function ScoutingSection({ leagueId, username }: ScoutingSectionProps) {
                   </Table>
                 </div>
                 <p className="text-xs text-muted-foreground mt-3" data-testid="text-draft-capital-explanation">
-                  Hoard Index = (R1 picks x 2) + R2 picks. Higher = more premium capital.
+                  DraftCap Score = (1sts x 3) + (2nds x 2) + (3rds x 1) + (4ths x 0.5). Higher = stronger rebuild ammo.
                 </p>
               </div>
             ) : (

@@ -117,11 +117,11 @@ export function LeagueGroupCard({ group, index, username, selectedSeason }: Leag
                   </div>
                   <div className="bg-secondary/30 rounded-md p-2">
                     <div className="text-xs text-muted-foreground">Win%</div>
-                    <div className="font-bold text-foreground">{summary.win_pct.toFixed(1)}%</div>
+                    <div className="font-bold text-foreground">{(summary.win_pct ?? 0).toFixed(1)}%</div>
                   </div>
                   <div className="bg-secondary/30 rounded-md p-2">
                     <div className="text-xs text-muted-foreground">PF</div>
-                    <div className="font-bold text-foreground">{summary.points_for.toFixed(1)}</div>
+                    <div className="font-bold text-foreground">{(summary.points_for ?? 0).toFixed(1)}</div>
                   </div>
                 </div>
               ) : summaryLoading ? (

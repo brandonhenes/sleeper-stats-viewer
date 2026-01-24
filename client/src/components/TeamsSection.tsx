@@ -500,7 +500,10 @@ export function TeamsSection({ leagueId, username, season, isSuperflex = false, 
                           <div className="flex items-center gap-2 mb-3">
                             <span className="text-sm font-medium">Draft Capital</span>
                             <Badge variant="default">
-                              Hoard Index: {teamCapital.pick_hoard_index}
+                              DraftCap: {(teamCapital.draft_cap_score ?? teamCapital.pick_hoard_index ?? 0).toFixed(1)}
+                            </Badge>
+                            <Badge variant="outline">
+                              {teamCapital.future_1sts ?? teamCapital.totals?.r1 ?? 0} Future 1sts
                             </Badge>
                           </div>
                           <Table>

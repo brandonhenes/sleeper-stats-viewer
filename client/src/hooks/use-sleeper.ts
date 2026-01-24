@@ -245,12 +245,15 @@ export function useScoutingStats(username: string | undefined) {
 }
 
 // GET /api/league/:leagueId/draft-capital?username=... - Get draft capital for a league
-export function useDraftCapital(leagueId: string | undefined, username: string | undefined) {
+export function useDraftCapital(leagueId: string | undefined, username: string | undefined, includeDebug = false) {
+  const isDebug = includeDebug || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1');
+  
   return useQuery({
-    queryKey: ["/api/league", leagueId, "draft-capital", username],
+    queryKey: ["/api/league", leagueId, "draft-capital", username, isDebug],
     queryFn: async () => {
       if (!leagueId || !username) return null;
-      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/draft-capital?username=${encodeURIComponent(username)}`);
+      const debugParam = isDebug ? '&debug=1' : '';
+      const res = await fetch(`/api/league/${encodeURIComponent(leagueId)}/draft-capital?username=${encodeURIComponent(username)}${debugParam}`);
       
       if (!res.ok) {
         if (res.status === 404) return null;

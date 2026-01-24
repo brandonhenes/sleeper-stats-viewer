@@ -1,0 +1,124 @@
+REPLIT AGENT — “DRAFT PICKS / DYNASTY OUTLOOK” FIX SPRINT
+Project: Sleeper Scout (existing codebase). DO NOT rewrite the app. Make minimal, targeted changes.
+
+Context:
+- Draft capital is currently computed in-memory in the server route
+  GET /api/league/:leagueId/draft-capital
+- The database does NOT store a computed pick-ownership or draft-capital table.
+- DB only stores trade history (trade_assets, trades.draft_picks), NOT final pick ownership.
+- This causes inconsistent / incomplete draft capital views and makes rebuild teams undervalued.
+
+Goal:
+Ensure future draft picks (draft capital) are correctly computed, optionally cached in DB, and displayed so rebuilding teams get proper credit (e.g., Reckless Abandon must reflect that my roster holds 4 future 1sts).
+
+────────────────────────────────────────
+1) DRAFT CAPITAL MUST BE COMPLETE (NOT ONLY TRADED PICKS)
+────────────────────────────────────────
+Problem:
+- Current logic relies on traded_picks + assumptions.
+- If no traded_picks exist for a year, picks may be missing or miscounted.
+- There is no durable source of truth for pick ownership.
+
+Required (server-side logic):
+- Build a BASELINE pick inventory for each league:
+  - baseYears = [league.season, league.season+1, league.season+2] (minimum)
+  - baseRounds:
+      - Try league.settings.draft_rounds
+      - Else draft settings if available
+      - Else fallback to 4 rounds
+- For EACH roster_id:
+  - Initialize baseline ownership:
+    - 1 pick per round per year per roster
+    - owner_roster_id = roster_id (original owner)
+- Apply /league/:leagueId/traded_picks as overrides:
+  - Move ownership of traded picks to new owner_roster_id
+  - Preserve original owner for display if needed
+
+Acceptance:
+- Draft capital tables always show future years even if no trades occurred.
+- For league “Reckless Abandon”, my roster shows 4 total 1st-round picks across future years.
+
+────────────────────────────────────────
+2) DATABASE: OPTIONAL BUT PREFERRED — CACHE DRAFT CAPITAL
+────────────────────────────────────────
+Problem:
+- Draft capital is recomputed on every request.
+- There is no persistent representation of pick ownership in Postgres.
+
+Preferred Fix:
+Create a lightweight cache table to store computed draft capital.
+
+Suggested table (example):
+draft_capital_cache (
+  league_id text,
+  roster_id text,
+  season_year int,
+  round int,
+  count int,
+  updated_at timestamp
+)
+
+Behavior:
+- After computing baseline + trades, upsert into draft_capital_cache.
+- Subsequent API calls should:
+  - Use cache if fresh
+  - Recompute + refresh if stale or missing
+
+Acceptance:
+- Draft capital can be queried from DB for debugging.
+- Draft capital is consistent across reloads and does not depend on Sleeper API timing.
+
+────────────────────────────────────────
+3) SURFACE DRAFT CAPITAL IN THE UI WHERE DECISIONS HAPPEN
+────────────────────────────────────────
+Required UI updates (minimal):
+- In LeagueGroupDetails (league detail), show:
+  - “Draft Capital” summary strip:
+      Next 3 years → (#1sts, #2nds, #3rds, #4ths)
+  - A table by year with round counts
+- In Talent Rankings / league list view:
+  - Add columns:
+      - “Future 1sts (3y)”
+      - “DraftCap Score”
+- DraftCap Score formula (simple, transparent):
+  - 1st = 3 points
+  - 2nd = 2 points
+  - 3rd = 1 point
+  - 4th = 0.5 points
+  - Sum over next 3 years
+
+Acceptance:
+- I can immediately see that a bad team has strong rebuild ammo.
+- Reckless Abandon clearly shows 4 future 1sts in summary + score.
+
+────────────────────────────────────────
+4) RESILIENCE: FIX NULL / UNDEFINED CRASHES
+────────────────────────────────────────
+- Never call .toFixed() on possibly-undefined values.
+- All numeric UI must use safe helpers with fallback “—”.
+- API schema + UI must tolerate nulls for:
+  - draft capital
+  - trade summaries
+  - picks_by_year
+
+Acceptance:
+- No runtime errors when pick data or trade data is missing.
+
+────────────────────────────────────────
+5) DEBUG PANEL (FAST VERIFICATION)
+────────────────────────────────────────
+When URL has ?debug=1, show:
+- leagueId, season
+- baseYears used
+- baseRounds used
+- number of baseline picks created
+- number of traded picks applied
+- my roster_id
+- computed totals (#1sts/#2nds/#3rds/#4ths)
+
+DONE WHEN:
+- Draft capital is complete + future years always appear.
+- Draft capital is optionally cached in DB.
+- Reckless Abandon reflects my 4 1sts.
+- UI shows draft capital in league detail + rankings/list view.
+- No crashes from undefined numeric fields.
