@@ -10,6 +10,8 @@ import { getStorageMode } from "./db";
 import { importMarketValues } from "./marketValues/importMarketValues";
 import { importFromAttachedAsset as importPickValuesFromCSV } from "./marketValues/importDraftPickValues";
 import { getUserPowerForLeague } from "./analytics/power";
+import * as edgeEngine from "./analytics/edgeEngine";
+import type { EdgeEngineResult, PlayerWithValue } from "./analytics/edgeEngine";
 
 const BASE = "https://api.sleeper.app/v1";
 
@@ -4772,6 +4774,216 @@ export async function registerRoutes(
       });
     } catch (e) {
       console.error("Team strength error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // ============================================
+  // EDGE ENGINE: Power Rankings + Team Needs
+  // ============================================
+  
+  // GET /api/league/:leagueId/edge-engine
+  // Returns comprehensive Edge Engine data: power rankings, team needs, surplus, etc.
+  app.get("/api/league/:leagueId/edge-engine", async (req, res) => {
+    try {
+      const { leagueId } = req.params;
+      const username = req.query.username as string;
+      const weightsParam = req.query.weights as string;
+      
+      const edgeEngine = await import("./analytics/edgeEngine");
+      
+      const league = await cache.getLeagueById(leagueId);
+      if (!league) {
+        return res.status(404).json({ message: "League not found" });
+      }
+      
+      const rawJson = league.raw_json ? JSON.parse(league.raw_json) : {};
+      const rosterPositions: string[] = rawJson.roster_positions || [];
+      const scoringSettings = rawJson.scoring_settings || {};
+      const totalRosters = rawJson.total_rosters || 12;
+      
+      const isSuperflex = rosterPositions.includes("SUPER_FLEX");
+      const isTep = scoringSettings.bonus_rec_te > 0 || 
+        (scoringSettings.rec_te && scoringSettings.rec_te > (scoringSettings.rec || 0));
+      
+      const asOfYear = new Date().getFullYear();
+      
+      const rosters = await cache.getRostersForLeague(leagueId);
+      const leagueUsers = await cache.getLeagueUsers(leagueId);
+      const userMap = new Map(leagueUsers.map(u => [u.user_id, u]));
+      
+      const allRosterPlayers = await cache.getAllRosterPlayersForLeague(leagueId);
+      const rosterPlayersMap = new Map<string, string[]>();
+      for (const rp of allRosterPlayers) {
+        if (!rosterPlayersMap.has(rp.owner_id)) rosterPlayersMap.set(rp.owner_id, []);
+        rosterPlayersMap.get(rp.owner_id)!.push(rp.player_id);
+      }
+      
+      const allPlayerIds = new Set<string>();
+      for (const rp of allRosterPlayers) allPlayerIds.add(rp.player_id);
+      
+      const [marketValues, playerMaster, draftCapitalResult] = await Promise.all([
+        cache.getMarketValuesByIds(Array.from(allPlayerIds), asOfYear),
+        cache.getPlayersByIds(Array.from(allPlayerIds)),
+        (async () => {
+          const draftCapital = await import("./analytics/draftCapital");
+          return draftCapital.computeDraftCapital(leagueId, false);
+        })(),
+      ]);
+      
+      const marketMap = new Map(marketValues.map(m => [m.player_id, m]));
+      const playerMap = new Map(playerMaster.map(p => [p.player_id, p]));
+      
+      const weights = weightsParam 
+        ? JSON.parse(weightsParam) 
+        : edgeEngine.DEFAULT_WEIGHTS;
+      
+      const results: edgeEngine.EdgeEngineResult[] = [];
+      
+      for (const roster of rosters) {
+        const ownerId = roster.owner_id;
+        const user = userMap.get(ownerId || "");
+        const playerIds = rosterPlayersMap.get(ownerId || "") || [];
+        
+        const players: edgeEngine.PlayerWithValue[] = playerIds.map(pid => {
+          const p = playerMap.get(pid);
+          const mv = marketMap.get(pid);
+          let value = 0;
+          if (mv) {
+            if (isTep && mv.trade_value_tep) value = mv.trade_value_tep;
+            else if (isSuperflex && mv.trade_value_sf) value = mv.trade_value_sf;
+            else value = mv.trade_value_std || 0;
+          }
+          return {
+            player_id: pid,
+            full_name: p?.full_name || pid,
+            position: p?.position || "?",
+            age: p?.age ?? null,
+            value,
+          };
+        }).filter(p => p.position !== "?");
+        
+        const lineup = edgeEngine.computeOptimalLineup(players, rosterPositions, isSuperflex, isTep);
+        
+        const rosterPicks = draftCapitalResult?.rosters.find(r => r.roster_id === roster.roster_id);
+        const picksValue = rosterPicks?.draft_cap_score ?? 0;
+        
+        const startersRank = 1;
+        const windowScore = edgeEngine.computeWindowScore(players, picksValue, startersRank, totalRosters);
+        const depthScore = edgeEngine.computeDepthScore(lineup, players);
+        const teamNeeds = edgeEngine.computeTeamNeeds(
+          startersRank, 1, windowScore, rosterPositions, players, totalRosters
+        );
+        const surplus = edgeEngine.computeSurplus(lineup, players, rosterPositions);
+        
+        const compositeScore = edgeEngine.computeCompositeScore(
+          lineup.startersValue,
+          lineup.benchValue,
+          picksValue,
+          depthScore.overall,
+          windowScore.overall,
+          weights
+        );
+        
+        results.push({
+          rosterId: roster.roster_id,
+          ownerName: user?.display_name || `Team ${roster.roster_id}`,
+          lineup,
+          windowScore,
+          depthScore,
+          teamNeeds,
+          surplus,
+          picksValue,
+          compositeScore,
+          rank: 0,
+        });
+      }
+      
+      results.sort((a, b) => b.compositeScore - a.compositeScore);
+      results.forEach((r, i) => { r.rank = i + 1; });
+      
+      for (const r of results) {
+        const startersRank = r.rank;
+        const picksRank = [...results]
+          .sort((a, b) => b.picksValue - a.picksValue)
+          .findIndex(x => x.rosterId === r.rosterId) + 1;
+        
+        const windowScore = edgeEngine.computeWindowScore(
+          r.lineup.starters.map((s: edgeEngine.SlotAssignment) => ({ 
+            player_id: s.player_id, 
+            full_name: s.player_name, 
+            position: s.position, 
+            age: null, 
+            value: s.value 
+          })),
+          r.picksValue,
+          startersRank,
+          totalRosters
+        );
+        
+        r.teamNeeds = edgeEngine.computeTeamNeeds(
+          startersRank, picksRank, windowScore, rosterPositions,
+          r.lineup.starters.map((s: edgeEngine.SlotAssignment) => ({ 
+            player_id: s.player_id, 
+            full_name: s.player_name, 
+            position: s.position, 
+            age: null, 
+            value: s.value 
+          })),
+          totalRosters
+        );
+      }
+      
+      const myRosterId = username 
+        ? rosters.find(r => {
+            const u = userMap.get(r.owner_id || "");
+            return u?.display_name?.toLowerCase() === username.toLowerCase();
+          })?.roster_id
+        : null;
+      
+      res.json({
+        league_id: leagueId,
+        season: league.season,
+        is_superflex: isSuperflex,
+        is_tep: isTep,
+        total_rosters: totalRosters,
+        weights,
+        my_roster_id: myRosterId,
+        teams: results.map(r => ({
+          roster_id: r.rosterId,
+          owner_name: r.ownerName,
+          rank: r.rank,
+          composite_score: r.compositeScore,
+          starters_value: r.lineup.startersValue,
+          bench_value: r.lineup.benchValue,
+          picks_value: r.picksValue,
+          depth_score: r.depthScore.overall,
+          age_score: r.windowScore.overall,
+          coverage_pct: r.lineup.coveragePct,
+          archetype: r.teamNeeds.archetype,
+          buy_points: r.teamNeeds.buyPoints,
+          buy_youth: r.teamNeeds.buyYouth,
+          sell_points: r.teamNeeds.sellPoints,
+          weakest_slot: r.teamNeeds.weakestSlot,
+          shallow_positions: r.teamNeeds.shallowPositions,
+          surplus_positions: r.teamNeeds.surplusPositions,
+          rationale: r.teamNeeds.rationale,
+          window: {
+            is_contender: r.windowScore.isContenderWindow,
+            is_rebuild: r.windowScore.isRebuildWindow,
+            by_position: r.windowScore.byPosition,
+          },
+          depth: {
+            starter_quality: r.depthScore.starterQuality,
+            bench_depth: r.depthScore.benchDepth,
+            fragility: r.depthScore.fragility,
+          },
+          surplus_players: r.surplus.surplus.slice(0, 5),
+          deficit_positions: r.surplus.deficits,
+        })),
+      });
+    } catch (e) {
+      console.error("Edge engine error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

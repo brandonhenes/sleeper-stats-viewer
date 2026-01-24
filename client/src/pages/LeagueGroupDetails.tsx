@@ -21,6 +21,7 @@ import { ScoutingSection } from "@/components/ScoutingSection";
 import { TeamsSection } from "@/components/TeamsSection";
 import { TradesSection } from "@/components/TradesSection";
 import { TradeTargetsModal } from "@/components/TradeTargetsModal";
+import { EdgeEngineSection } from "@/components/EdgeEngineSection";
 
 function fmtNum(v: unknown, decimals = 1, fallback = "—"): string {
   if (v == null) return fallback;
@@ -343,6 +344,10 @@ export default function LeagueGroupDetails() {
                 <TabsTrigger value="overview" className="gap-1" data-testid="tab-overview">
                   <BarChart3 className="w-3 h-3" />
                   Overview
+                </TabsTrigger>
+                <TabsTrigger value="edge" className="gap-1" data-testid="tab-edge-engine">
+                  <Sparkles className="w-3 h-3" />
+                  Edge Engine
                 </TabsTrigger>
                 <TabsTrigger value="teams" className="gap-1" data-testid="tab-teams">
                   <Users className="w-3 h-3" />
@@ -675,6 +680,15 @@ export default function LeagueGroupDetails() {
                 <div className="mt-6">
                   <ScoutingSection leagueId={activeLeagueId} username={username} />
                 </div>
+              </TabsContent>
+
+              {/* EDGE ENGINE TAB */}
+              <TabsContent value="edge" className="mt-6">
+                <EdgeEngineSection 
+                  leagueId={activeLeagueId || ""} 
+                  username={username}
+                  myRosterId={draftCapitalData?.roster_id}
+                />
               </TabsContent>
 
               {/* TEAMS TAB */}

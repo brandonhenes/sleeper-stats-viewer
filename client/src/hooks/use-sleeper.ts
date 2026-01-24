@@ -913,3 +913,88 @@ export function useGroupAnalytics(username: string | undefined, season?: number)
     staleTime: 1000 * 60 * 5, // Cache for 5 minutes
   });
 }
+
+// Edge Engine types
+export interface EdgeEngineTeam {
+  roster_id: number;
+  owner_name: string;
+  rank: number;
+  composite_score: number;
+  starters_value: number;
+  bench_value: number;
+  picks_value: number;
+  depth_score: number;
+  age_score: number;
+  coverage_pct: number;
+  archetype: "contender" | "rebuilder" | "tweener";
+  buy_points: number;
+  buy_youth: number;
+  sell_points: number;
+  weakest_slot: string | null;
+  shallow_positions: string[];
+  surplus_positions: string[];
+  rationale: string;
+  window: {
+    is_contender: boolean;
+    is_rebuild: boolean;
+    by_position: Array<{
+      position: string;
+      avgAge: number;
+      score: number;
+      inPrime: boolean;
+      primeYearsLeft: number;
+    }>;
+  };
+  depth: {
+    starter_quality: number;
+    bench_depth: number;
+    fragility: number;
+  };
+  surplus_players: Array<{
+    player_id: string;
+    player_name: string;
+    position: string;
+    value: number;
+    surplusScore: number;
+  }>;
+  deficit_positions: string[];
+}
+
+export interface EdgeEngineWeights {
+  starters: number;
+  bench: number;
+  picks: number;
+  depth: number;
+  age: number;
+}
+
+export interface EdgeEngineResponse {
+  league_id: string;
+  season: number;
+  is_superflex: boolean;
+  is_tep: boolean;
+  total_rosters: number;
+  weights: EdgeEngineWeights;
+  my_roster_id: number | null;
+  teams: EdgeEngineTeam[];
+}
+
+export function useEdgeEngine(leagueId: string | undefined, username?: string, weights?: EdgeEngineWeights) {
+  return useQuery<EdgeEngineResponse>({
+    queryKey: ["/api/league", leagueId, "edge-engine", username, weights],
+    queryFn: async () => {
+      if (!leagueId) throw new Error("No league ID");
+      let url = `/api/league/${encodeURIComponent(leagueId)}/edge-engine`;
+      const params: string[] = [];
+      if (username) params.push(`username=${encodeURIComponent(username)}`);
+      if (weights) params.push(`weights=${encodeURIComponent(JSON.stringify(weights))}`);
+      if (params.length) url += `?${params.join("&")}`;
+      
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch edge engine data");
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+  });
+}

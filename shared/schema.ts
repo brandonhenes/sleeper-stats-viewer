@@ -208,6 +208,44 @@ export const draft_capital_cache = pgTable("draft_capital_cache", {
   uniqueIndex("idx_draft_capital_unique").on(table.league_id, table.roster_id, table.season_year, table.round),
 ]);
 
+// Draft picks ownership: detailed per-pick ownership tracking
+// Each row represents a single pick (original_roster_id's pick for season/round) and who owns it
+export const draft_picks_ownership = pgTable("draft_picks_ownership", {
+  id: serial("id").primaryKey(),
+  league_id: text("league_id").notNull(),
+  season: integer("season").notNull(),
+  round: integer("round").notNull(),
+  original_roster_id: integer("original_roster_id").notNull(),
+  owner_roster_id: integer("owner_roster_id").notNull(),
+  pick_value: real("pick_value"), // computed from draft_pick_values table
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_picks_ownership_league").on(table.league_id),
+  index("idx_picks_ownership_owner").on(table.owner_roster_id),
+  uniqueIndex("idx_picks_ownership_unique").on(table.league_id, table.season, table.round, table.original_roster_id),
+]);
+
+// Power rankings snapshot: caches computed power scores per roster
+export const power_rankings_cache = pgTable("power_rankings_cache", {
+  id: serial("id").primaryKey(),
+  league_id: text("league_id").notNull(),
+  roster_id: integer("roster_id").notNull(),
+  starters_value: real("starters_value").notNull().default(0),
+  bench_value: real("bench_value").notNull().default(0),
+  picks_value: real("picks_value").notNull().default(0),
+  depth_score: real("depth_score").notNull().default(0),
+  age_score: real("age_score").notNull().default(0),
+  window_score: real("window_score").notNull().default(0),
+  total_score: real("total_score").notNull().default(0),
+  rank: integer("rank").notNull().default(0),
+  coverage_pct: real("coverage_pct").notNull().default(0),
+  archetype: text("archetype"), // "contender", "rebuilder", "tweener"
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_power_rankings_league").on(table.league_id),
+  uniqueIndex("idx_power_rankings_unique").on(table.league_id, table.roster_id),
+]);
+
 // User exposure summary for trade targeting
 // Caches each user's player exposure across their active leagues
 export const user_exposure_summary = pgTable("user_exposure_summary", {
