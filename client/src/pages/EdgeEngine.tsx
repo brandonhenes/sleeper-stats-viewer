@@ -74,20 +74,6 @@ export default function EdgeEngine() {
     }
   };
 
-  if (loadingOverview) {
-    return (
-      <Layout username={username}>
-        <div className="container mx-auto px-4 py-8 max-w-6xl">
-          <div className="flex items-center justify-center h-64">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  const teams = edgeData?.teams ?? [];
-  
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDir(prev => prev === "asc" ? "desc" : "asc");
@@ -96,6 +82,8 @@ export default function EdgeEngine() {
       setSortDir(field === "rank" ? "asc" : "desc");
     }
   };
+
+  const teams = edgeData?.teams ?? [];
   
   const sortedTeams = useMemo(() => {
     const getValue = (t: any) => {
