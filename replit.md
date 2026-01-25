@@ -76,3 +76,33 @@ Preferred communication style: Simple, everyday language.
 ### Environment Variables
 - `DATABASE_URL`: PostgreSQL connection string.
 - `SESSION_SECRET`: For session management.
+
+## Recent Changes
+
+### January 25, 2026 (Professional Draft Pick Valuation Pipeline)
+**Data Import** (`server/marketValues/importDraftPickValues.ts`):
+- Imports draft pick values from CSV into `draft_pick_values` table
+- Parses Pick_Description into round and tier columns
+- Stores 1QB and Superflex values separately
+- Endpoint: `POST /api/debug/import-pick-values`
+
+**Draft Capital Valuation** (`server/analytics/draftCapital.ts`):
+- New `computePicksValueForLeague` function uses database-driven pick values
+- **Luck-Adjusted Tier Estimation**: Uses Max PF Rank to estimate pick position
+  - Top third (Rank 1-4 in 12-team): Late picks (1.07-1.12)
+  - Middle third (Rank 5-8): Mid picks (1.04-1.06)
+  - Bottom third (Rank 9-12): Early picks (1.01-1.03)
+- Format-sensitive: Uses `value_sf` for Superflex leagues, `value_1qb` otherwise
+- Graceful fallback to hardcoded values when database unavailable
+
+**Edge Engine Integration** (`server/routes.ts`):
+- Pre-computes lineups to get Max PF for all rosters
+- Ranks rosters by Max PF before computing pick values
+- Uses `computePicksValueForLeague` with Max PF ranks for accurate valuation
+
+### Edge Engine Features
+- **Weight Formula**: 45% Starters, 15% Bench, 15% Max PF, 20% Draft Capital, 5% Age Window
+- **Team Archetypes**: all-in-contender, fragile-contender, productive-struggle, dead-zone, rebuilder
+- **Max PF (Luck Score)**: Compares actual_pf vs max_pf (from lineup optimizer)
+- **Sortable Power Rankings**: Sort by Rank, Starters, Bench, Max PF, Picks, Age, Efficiency
+- **Trade Radar**: Matches surplus players to opponents' deficit positions
