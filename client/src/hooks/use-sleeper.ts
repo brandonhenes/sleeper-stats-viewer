@@ -923,10 +923,13 @@ export interface EdgeEngineTeam {
   starters_value: number;
   bench_value: number;
   picks_value: number;
-  depth_score: number;
+  actual_pf: number;
+  max_pf: number;
+  max_pf_score: number;
+  luck_flag: string | null;
   age_score: number;
   coverage_pct: number;
-  archetype: "contender" | "rebuilder" | "tweener";
+  archetype: "all-in-contender" | "fragile-contender" | "productive-struggle" | "dead-zone" | "rebuilder";
   buy_points: number;
   buy_youth: number;
   sell_points: number;
@@ -963,8 +966,8 @@ export interface EdgeEngineTeam {
 export interface EdgeEngineWeights {
   starters: number;
   bench: number;
+  maxPf: number;
   picks: number;
-  depth: number;
   age: number;
 }
 

@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Users, Layers, Target, TrendingUp } from "lucide-react";
+import { User, Users, Trophy, Zap, TrendingUp } from "lucide-react";
 import { DebugDrawer } from "./DebugDrawer";
 
 interface LayoutProps {
@@ -14,9 +14,8 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
   const [location] = useLocation();
   
   const getActiveTab = () => {
-    if (location.includes("/players/")) return "players";
-    if (location.includes("/scouting/")) return "scouting";
-    if (location.includes("/market/")) return "market";
+    if (location.includes("/trophy/") || location.includes("/players/")) return "trophy";
+    if (location.includes("/edge/") || location.includes("/scouting/") || location.includes("/market/")) return "edge";
     if (location.includes("/compare")) return "compare";
     return "profile";
   };
@@ -31,7 +30,7 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
             <div className="flex items-center justify-between gap-4">
               <Link href="/">
                 <span className="font-display font-bold text-lg cursor-pointer hover:text-primary transition-colors" data-testid="link-home">
-                  Sleeper Scout
+                  Dynasty Edge
                 </span>
               </Link>
               
@@ -46,26 +45,18 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
                     </Link>
                   )}
                   {username && (
-                    <Link href={`/players/${username}`}>
-                      <TabsTrigger value="players" className="gap-2" data-testid="tab-players">
-                        <Layers className="w-4 h-4" />
-                        Players
+                    <Link href={`/trophy/${username}`}>
+                      <TabsTrigger value="trophy" className="gap-2" data-testid="tab-trophy-room">
+                        <Trophy className="w-4 h-4" />
+                        Trophy Room
                       </TabsTrigger>
                     </Link>
                   )}
                   {username && (
-                    <Link href={`/scouting/${username}`}>
-                      <TabsTrigger value="scouting" className="gap-2" data-testid="tab-scouting">
-                        <Target className="w-4 h-4" />
-                        Scouting
-                      </TabsTrigger>
-                    </Link>
-                  )}
-                  {username && (
-                    <Link href={`/market/${username}`}>
-                      <TabsTrigger value="market" className="gap-2" data-testid="tab-market">
-                        <TrendingUp className="w-4 h-4" />
-                        Market
+                    <Link href={`/edge/${username}`}>
+                      <TabsTrigger value="edge" className="gap-2" data-testid="tab-edge-engine">
+                        <Zap className="w-4 h-4" />
+                        Edge Engine
                       </TabsTrigger>
                     </Link>
                   )}

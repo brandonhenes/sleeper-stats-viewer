@@ -4876,11 +4876,17 @@ export async function registerRoutes(
         );
         const surplus = edgeEngine.computeSurplus(lineup, players, rosterPositions);
         
+        const actualPf = roster.fpts || 0;
+        const maxPf = lineup.startersValue * 10;
+        const pfDelta = maxPf > 0 ? Math.min(1, actualPf / maxPf) * 100 : 50;
+        const maxPfScore = Math.min(100, Math.max(0, pfDelta));
+        const luckFlag = pfDelta > 80 ? "Efficient" : pfDelta < 50 && lineup.startersValue > 1000 ? "Unlucky/Strong" : null;
+        
         const compositeScore = edgeEngine.computeCompositeScore(
           lineup.startersValue,
           lineup.benchValue,
           picksValue,
-          depthScore.overall,
+          maxPfScore,
           windowScore.overall,
           weights
         );
@@ -4896,6 +4902,10 @@ export async function registerRoutes(
           picksValue,
           compositeScore,
           rank: 0,
+          actualPf,
+          maxPf,
+          maxPfScore,
+          luckFlag,
         });
       }
       
@@ -4957,7 +4967,10 @@ export async function registerRoutes(
           starters_value: r.lineup.startersValue,
           bench_value: r.lineup.benchValue,
           picks_value: r.picksValue,
-          depth_score: r.depthScore.overall,
+          actual_pf: r.actualPf,
+          max_pf: r.maxPf,
+          max_pf_score: r.maxPfScore,
+          luck_flag: r.luckFlag,
           age_score: r.windowScore.overall,
           coverage_pct: r.lineup.coveragePct,
           archetype: r.teamNeeds.archetype,

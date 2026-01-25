@@ -205,7 +205,7 @@ export function computeWindowScore(
   };
 }
 
-export type TeamArchetype = "contender" | "rebuilder" | "tweener";
+export type TeamArchetype = "all-in-contender" | "fragile-contender" | "productive-struggle" | "dead-zone" | "rebuilder";
 
 export interface TeamNeeds {
   archetype: TeamArchetype;
@@ -226,7 +226,7 @@ export function computeTeamNeeds(
   players: PlayerWithValue[],
   totalRosters: number
 ): TeamNeeds {
-  let archetype: TeamArchetype = "tweener";
+  let archetype: TeamArchetype = "dead-zone";
   let buyPoints = 50;
   let buyYouth = 50;
   let sellPoints = 50;
@@ -234,25 +234,42 @@ export function computeTeamNeeds(
 
   const startersPct = (startersRank / totalRosters) * 100;
   const picksPct = (picksRank / totalRosters) * 100;
+  const avgPrimeYearsLeft = windowScore.byPosition.length > 0 
+    ? windowScore.byPosition.reduce((sum, p) => sum + p.primeYearsLeft, 0) / windowScore.byPosition.length 
+    : 0;
 
-  if (windowScore.isContenderWindow && startersPct <= 40) {
-    archetype = "contender";
-    buyPoints = 80;
-    buyYouth = 20;
-    sellPoints = 30;
-    rationale = "Strong roster in competitive window - buy production now";
-  } else if (windowScore.isRebuildWindow || startersPct > 70) {
+  if (windowScore.isContenderWindow && startersPct <= 33) {
+    if (avgPrimeYearsLeft >= 2 && picksPct <= 50) {
+      archetype = "all-in-contender";
+      buyPoints = 90;
+      buyYouth = 10;
+      sellPoints = 20;
+      rationale = "Elite roster in prime window - maximize win-now moves";
+    } else {
+      archetype = "fragile-contender";
+      buyPoints = 75;
+      buyYouth = 30;
+      sellPoints = 40;
+      rationale = "Strong but aging roster - balance competing with succession planning";
+    }
+  } else if (windowScore.isRebuildWindow || startersPct > 75) {
     archetype = "rebuilder";
-    buyPoints = 20;
-    buyYouth = 85;
-    sellPoints = 75;
-    rationale = "Building for future - accumulate youth and picks";
+    buyPoints = 15;
+    buyYouth = 90;
+    sellPoints = 80;
+    rationale = "Building for future - accumulate youth and picks aggressively";
+  } else if (startersPct <= 50 && avgPrimeYearsLeft >= 3) {
+    archetype = "productive-struggle";
+    buyPoints = 55;
+    buyYouth = 60;
+    sellPoints = 45;
+    rationale = "Young core developing - compete while building for sustained success";
   } else {
-    archetype = "tweener";
-    buyPoints = 50;
+    archetype = "dead-zone";
+    buyPoints = 40;
     buyYouth = 50;
-    sellPoints = 50;
-    rationale = "Mixed signals - could go either direction";
+    sellPoints = 60;
+    rationale = "Stuck in middle - need to commit to a direction";
   }
 
   const positionCounts: Record<string, number> = {};
@@ -436,13 +453,17 @@ export interface EdgeEngineResult {
   picksValue: number;
   compositeScore: number;
   rank: number;
+  actualPf: number;
+  maxPf: number;
+  maxPfScore: number;
+  luckFlag: string | null;
 }
 
 export const DEFAULT_WEIGHTS = {
   starters: 45,
   bench: 15,
-  picks: 15,
-  depth: 20,
+  maxPf: 15,
+  picks: 20,
   age: 5,
 };
 
@@ -450,7 +471,7 @@ export function computeCompositeScore(
   startersValue: number,
   benchValue: number,
   picksValue: number,
-  depthScore: number,
+  maxPfScore: number,
   ageScore: number,
   weights = DEFAULT_WEIGHTS
 ): number {
@@ -462,13 +483,13 @@ export function computeCompositeScore(
   const benchNorm = Math.min(100, (benchValue / maxBench) * 100);
   const picksNorm = Math.min(100, (picksValue / maxPicks) * 100);
 
-  const totalWeight = weights.starters + weights.bench + weights.picks + weights.depth + weights.age;
+  const totalWeight = weights.starters + weights.bench + weights.maxPf + weights.picks + weights.age;
   
   const score = 
     (startersNorm * weights.starters / totalWeight) +
     (benchNorm * weights.bench / totalWeight) +
+    (maxPfScore * weights.maxPf / totalWeight) +
     (picksNorm * weights.picks / totalWeight) +
-    (depthScore * weights.depth / totalWeight) +
     (ageScore * weights.age / totalWeight);
 
   return Math.round(score * 10) / 10;

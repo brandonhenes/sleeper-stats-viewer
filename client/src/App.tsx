@@ -13,6 +13,8 @@ import Compare from "@/pages/Compare";
 import CompareResults from "@/pages/CompareResults";
 import Scouting from "@/pages/Scouting";
 import Market from "@/pages/Market";
+import TrophyRoom from "@/pages/TrophyRoom";
+import EdgeEngine from "@/pages/EdgeEngine";
 
 function Router() {
   return (
@@ -20,6 +22,8 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/u/:username" component={Profile} />
       <Route path="/u/:username/league/:groupId" component={LeagueGroupDetails} />
+      <Route path="/trophy/:username" component={TrophyRoom} />
+      <Route path="/edge/:username" component={EdgeEngine} />
       <Route path="/players/:username" component={Players} />
       <Route path="/scouting/:username" component={Scouting} />
       <Route path="/compare" component={Compare} />
