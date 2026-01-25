@@ -4822,13 +4822,9 @@ export async function registerRoutes(
       const allPlayerIds = new Set<string>();
       for (const rp of allRosterPlayers) allPlayerIds.add(rp.player_id);
       
-      const [marketValues, playerMaster, draftCapitalResult] = await Promise.all([
+      const [marketValues, playerMaster] = await Promise.all([
         cache.getMarketValuesByIds(Array.from(allPlayerIds), asOfYear),
         cache.getPlayersByIds(Array.from(allPlayerIds)),
-        (async () => {
-          const draftCapital = await import("./analytics/draftCapital");
-          return draftCapital.computeDraftCapital(leagueId, false);
-        })(),
       ]);
       
       const marketMap = new Map(marketValues.map(m => [m.player_id, m]));
@@ -4838,11 +4834,15 @@ export async function registerRoutes(
         ? JSON.parse(weightsParam) 
         : edgeEngine.DEFAULT_WEIGHTS;
       
-      const results: edgeEngine.EdgeEngineResult[] = [];
+      const lineupsPrecomputed = new Map<number, { 
+        lineup: edgeEngine.LineupResult; 
+        players: edgeEngine.PlayerWithValue[];
+        actualPf: number;
+        maxPf: number;
+      }>();
       
       for (const roster of rosters) {
         const ownerId = roster.owner_id;
-        const user = userMap.get(ownerId || "");
         const playerIds = rosterPlayersMap.get(ownerId || "") || [];
         
         const players: edgeEngine.PlayerWithValue[] = playerIds.map(pid => {
@@ -4864,9 +4864,35 @@ export async function registerRoutes(
         }).filter(p => p.position !== "?");
         
         const lineup = edgeEngine.computeOptimalLineup(players, rosterPositions, isSuperflex, isTep);
+        const actualPf = roster.fpts || 0;
+        const maxPf = lineup.startersValue * 10;
         
-        const rosterPicks = draftCapitalResult?.rosters.find(r => r.roster_id === roster.roster_id);
-        const picksValue = rosterPicks?.draft_cap_score ?? 0;
+        lineupsPrecomputed.set(roster.roster_id, { lineup, players, actualPf, maxPf });
+      }
+      
+      const maxPfRanks = new Map<number, number>();
+      const sortedByMaxPf = Array.from(lineupsPrecomputed.entries())
+        .sort((a, b) => b[1].maxPf - a[1].maxPf);
+      sortedByMaxPf.forEach(([rosterId], idx) => {
+        maxPfRanks.set(rosterId, idx + 1);
+      });
+      
+      const draftCapital = await import("./analytics/draftCapital");
+      const picksValueMap = await draftCapital.computePicksValueForLeague(leagueId, maxPfRanks, isSuperflex);
+      
+      const results: edgeEngine.EdgeEngineResult[] = [];
+      
+      for (const roster of rosters) {
+        const ownerId = roster.owner_id;
+        const user = userMap.get(ownerId || "");
+        
+        const precomputed = lineupsPrecomputed.get(roster.roster_id);
+        if (!precomputed) continue;
+        
+        const { lineup, players, actualPf, maxPf } = precomputed;
+        
+        const rosterPicksData = picksValueMap.get(roster.roster_id);
+        const picksValue = rosterPicksData?.total_value ?? 0;
         
         const startersRank = 1;
         const windowScore = edgeEngine.computeWindowScore(players, picksValue, startersRank, totalRosters);
@@ -4876,8 +4902,6 @@ export async function registerRoutes(
         );
         const surplus = edgeEngine.computeSurplus(lineup, players, rosterPositions);
         
-        const actualPf = roster.fpts || 0;
-        const maxPf = lineup.startersValue * 10;
         const pfDelta = maxPf > 0 ? Math.min(1, actualPf / maxPf) * 100 : 50;
         const maxPfScore = Math.min(100, Math.max(0, pfDelta));
         const luckFlag = pfDelta > 80 ? "Efficient" : pfDelta < 50 && lineup.startersValue > 1000 ? "Unlucky/Strong" : null;

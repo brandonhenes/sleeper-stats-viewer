@@ -130,6 +130,7 @@ export async function importDraftPickValues(csvPath: string): Promise<ImportResu
 
 export async function importFromAttachedAsset(): Promise<ImportResult> {
   const possiblePaths = [
+    "attached_assets/DynastyTradeValuesDP_Jan2026.csv_-_Sheet1_1769304846012.csv",
     "attached_assets/DynastyTradeValuesDP_Jan2026.csv_-_Sheet1_1768620976740.csv",
     "attached_assets/DynastyTradeValuesDP_Jan2026.csv",
   ];
@@ -137,6 +138,7 @@ export async function importFromAttachedAsset(): Promise<ImportResult> {
   for (const p of possiblePaths) {
     const fullPath = path.resolve(p);
     if (fs.existsSync(fullPath)) {
+      console.log(`[import-pick-values] Found CSV at: ${fullPath}`);
       return importDraftPickValues(fullPath);
     }
   }
