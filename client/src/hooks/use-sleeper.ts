@@ -1001,3 +1001,118 @@ export function useEdgeEngine(leagueId: string | undefined, username?: string, w
     staleTime: 1000 * 60 * 2, // Cache for 2 minutes
   });
 }
+
+// ========================================
+// CANONICAL POWER RANKINGS (Unified)
+// ========================================
+export interface PowerRankingsWeights {
+  starters: number;
+  bench: number;
+  picks: number;
+  window: number;
+  maxPf: number;
+}
+
+export interface PickBreakdown {
+  year: number;
+  round: number;
+  tier: string;
+  value: number;
+  originalOwnerRosterId: number;
+  valueSource: "db" | "fallback";
+}
+
+export interface PositionAgeScore {
+  position: string;
+  avgAge: number;
+  score: number;
+  inPrime: boolean;
+  primeYearsLeft: number;
+}
+
+export interface PowerRankingsTeam {
+  roster_id: number;
+  owner_id: string | null;
+  display_name: string;
+  rank: number;
+  starters_value: number;
+  bench_value: number;
+  picks_value: number;
+  window_value: number;
+  starters_score: number;
+  bench_score: number;
+  picks_score: number;
+  window_score: number;
+  total_score: number;
+  coverage_pct: number | null;
+  picks_breakdown: PickBreakdown[];
+  draft_capital_counts: Record<number, number>;
+  age_by_position: PositionAgeScore[];
+  actual_pf: number;
+  max_pf: number;
+  max_pf_score: number;
+  efficiency_pct: number;
+  luck_flag: string | null;
+  archetype: string;
+}
+
+export interface PowerRankingsDebug {
+  isSuperflex: boolean;
+  isTep: boolean;
+  rosterPositionsSample: string[];
+  valueColumn: "sf" | "1qb";
+  tierAssignments: PickBreakdown[];
+  normalizationStats: {
+    starters: { min: number; max: number; median: number };
+    bench: { min: number; max: number; median: number };
+    picks: { min: number; max: number; median: number };
+    window: { min: number; max: number; median: number };
+  };
+  strengthRankSource: string;
+}
+
+export interface PowerRankingsResponse {
+  leagueId: string;
+  season: number;
+  totalRosters: number;
+  formatFlags: { superflex: boolean; tep: boolean };
+  weights: PowerRankingsWeights;
+  teams: PowerRankingsTeam[];
+  debug?: PowerRankingsDebug;
+}
+
+export const DEFAULT_POWER_RANKINGS_WEIGHTS: PowerRankingsWeights = {
+  starters: 45,
+  bench: 15,
+  picks: 15,
+  window: 20,
+  maxPf: 5,
+};
+
+export function usePowerRankings(
+  leagueId: string | undefined, 
+  options?: { 
+    includeDebug?: boolean; 
+    weights?: PowerRankingsWeights 
+  }
+) {
+  const { includeDebug = false, weights } = options || {};
+  
+  return useQuery<PowerRankingsResponse>({
+    queryKey: ["/api/league", leagueId, "power-rankings", includeDebug, weights],
+    queryFn: async () => {
+      if (!leagueId) throw new Error("No league ID");
+      let url = `/api/league/${encodeURIComponent(leagueId)}/power-rankings`;
+      const params: string[] = [];
+      if (includeDebug) params.push("debug=1");
+      if (weights) params.push(`weights=${encodeURIComponent(JSON.stringify(weights))}`);
+      if (params.length) url += `?${params.join("&")}`;
+      
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch power rankings");
+      return res.json();
+    },
+    enabled: !!leagueId,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
+}

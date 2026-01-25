@@ -1,0 +1,315 @@
+You are the Replit Agent working in my repo for “Dynasty Edge / sleeper-stats-viewer”. I need an ALL-IN overhaul that fixes the current split-brain rankings, implements true draft pick VALUES from the provided CSV, ensures correct Superflex detection, and produces a single canonical “Power Rankings” output used everywhere.
+
+This is NOT a “task list only” job. Implement end-to-end and verify with debug output and acceptance tests.
+
+========================================================
+0) WHAT’S BROKEN RIGHT NOW (PRIMARY SYMPTOMS)
+========================================================
+1) The main page “Talent Rankings / Power Rankings” does NOT match the Dynasty Edge (Edge Engine) tab totals/ranks, especially around picks.
+   → This implies duplicated scoring logic, different endpoints, or stale caches.
+2) Draft picks are shown, but the “picks” number differs between views because:
+   - one view is using hardcoded draft weights (3/2/1),
+   - another view is using the new draft pick tier logic (or partially), or
+   - Superflex values aren’t being selected consistently.
+3) “Coverage” is confusing and is not clearly defined. It must be either:
+   - removed from the default ranking table, OR
+   - renamed and precisely defined as “Value Coverage” (% of assets with values).
+
+========================================================
+1) NON-NEGOTIABLES
+========================================================
+- Do NOT start over. Refactor/extend the existing app.
+- Create ONE canonical scoring pipeline on the SERVER.
+- BOTH the main Talent Rankings view and Edge Engine view must render from the SAME server endpoint payload.
+- Superflex detection must NOT rely on league.settings.type. It must use league.roster_positions (presence of “SUPER_FLEX”).
+- Draft pick valuation must be data-driven from the provided CSV, not hardcoded weights.
+- Numeric safety everywhere: no toFixed() on undefined/NaN; use formatting helpers with fallbacks.
+- Sorting: all ranking tables must be sortable by every numeric column shown.
+- Add a debug mode that can prove which values are being used (1QB vs SF), what tiers were assigned, and why the two views match.
+
+========================================================
+2) PRODUCT SHAPE (HIGH LEVEL)
+========================================================
+Top Nav (final):
+- Profile (overview + league list)
+- Trophy Room (history/fun: finishes, head-to-head, payouts)
+- Edge Engine (optimizer: forward-looking rankings + picks + scouting)
+- Compare
+
+However: the core requirement is functional correctness first. UI reorg should happen after canonical scoring is correct.
+
+========================================================
+3) SINGLE SOURCE OF TRUTH: CANONICAL SERVER ENGINE
+========================================================
+Create a server module that is the ONLY place computing “power rankings” values.
+
+Create:
+  server/engine/powerRankings.ts  (or similar, name is flexible)
+
+Export:
+  computeTeamCompositeValue(leagueContext, teamContext, options)
+
+It must return for each roster/team:
+- starters_value
+- bench_value
+- picks_value
+- window_value (age/prime score; position-specific)
+- coverage_pct (if values exist; else null/"No data")
+- total_value (normalized + weighted)
+- debug: { isSuperflex, valuesSource, tierAssignments, normalizationStats }
+
+Then create ONE endpoint:
+  GET /api/league/:leagueId/power-rankings?season=YYYY
+
+This endpoint returns an array of team rows with all the above fields and ranks.
+
+CRITICAL RULE:
+- The main page Talent Rankings table must use this endpoint.
+- The Edge Engine rankings must use this endpoint.
+- Delete/disable any client-side recomputation of totals.
+
+========================================================
+4) NORMALIZATION + WEIGHTS (IMPORTANT TO AVOID “DROWNING OUT”)
+========================================================
+We want weights that “feel right”:
+Default weights:
+- Starters: 45%
+- Bench: 15%
+- Picks: 15%
+- Window/Age: 20%
+- (Coverage is NOT part of total score; display only)
+
+You MUST normalize each component before applying weights. Do NOT normalize using raw max only (outlier risk).
+Use percentile normalization (robust and intuitive):
+
+For each league:
+- For each component (starters, bench, picks, window):
+  component_score = 100 * percentile_rank(component_value among teams in that league)
+
+Then:
+total_score = 0.45*starters_score + 0.15*bench_score + 0.15*picks_score + 0.20*window_score
+
+Return total_score plus the raw components.
+
+Persist weights in localStorage and allow editing later; default must be as above.
+
+========================================================
+5) SUPERFLEX DETECTION (MUST BE CONSISTENT)
+========================================================
+Implement helper:
+  isSuperflexLeague(league): boolean
+Rules:
+- Use league.roster_positions from Sleeper league object.
+- If roster_positions includes "SUPER_FLEX", it’s Superflex.
+- Otherwise 1QB.
+
+This is the ONLY flag used for selecting SF vs 1QB values.
+Do not rely on settings.type.
+
+In debug output, include:
+- isSuperflex: true/false
+- roster_positions sample
+
+========================================================
+6) DRAFT PICK VALUES: CSV → DB → COMPUTATION
+========================================================
+Goal: replace hardcoded draft weights (3/2/1) with real values from the provided CSV:
+  DynastyTradeValuesDP_Jan2026.csv (this file is for PICKS)
+
+A) DATABASE TABLE (draft pick values)
+Check shared/schema.ts:
+- If a draftPickValues/draft_pick_values table already exists, verify columns/types match CSV precisely.
+- If it does not exist, create it.
+
+Table must include:
+- season_year (int)
+- pick_round (int)
+- pick_tier (text)  // "1.01-1.03", "1.04-1.06", "1.07-1.12", "early", "late", "all"
+- value_1qb (numeric/int)
+- value_sf  (numeric/int)
+- source (text)
+- updated_at (bigint)
+Unique key on (season_year, pick_round, pick_tier).
+
+Run drizzle push/migration and verify table exists.
+
+B) IMPORT SCRIPT (idempotent upsert)
+Create:
+  server/marketValues/importDraftPickValues.ts
+
+Read the CSV from attached_assets (use the actual filename in the repo).
+Parse Pick_Description robustly (handle en dash “–”, hyphen, whitespace).
+
+Mapping rules (exact):
+- "1.01 – 1.03" => round=1 tier="1.01-1.03"
+- "1.04 – 1.06" => round=1 tier="1.04-1.06"
+- "1.07 – 1.12" => round=1 tier="1.07-1.12"
+- "Early second" => round=2 tier="early"
+- "Late second"  => round=2 tier="late"
+- "Early third"  => round=3 tier="early"
+- "Late third"   => round=3 tier="late"
+- "All others"   => round=4 tier="all"  (this applies to round >= 4 in valuation)
+
+Upsert rows by unique key. Safe to run multiple times.
+
+Add a verification log:
+- “Imported draft pick values: X rows”
+- “draft_pick_values rowcount: Y”
+
+C) MAINTENANCE ROUTE / SYNC INTEGRATION
+Ensure the import runs at least once:
+- Either integrate into existing /api/sync
+- Or add /api/maintenance/import-draft-pick-values (dev/admin)
+In dev mode, run automatically on server start if table empty.
+
+D) PICK OWNERSHIP (who owns which picks)
+Use Sleeper /league/:leagueId/traded_picks to compute ownership for ALL teams.
+Do not limit to a fixed year range; include:
+- all years present in traded_picks
+- plus baseline years: [season, season+1, season+2] at minimum
+
+Rounds:
+- support at least 1–4 baseline
+- if league has different draft_rounds, use that
+- treat round >=4 as tier="all"
+
+Persist ownership if you already have a table; if not, compute on demand but ensure debug can explain.
+
+E) TIER ESTIMATION (“THE EDGE”)
+Future pick slots are unknown. Estimate tier based on original owner strength.
+
+IMPORTANT: DO NOT use “top/middle/bottom third” for round 1 because your CSV tier sizes are 3/3/6 (in 12-team), not 4/4/4.
+Instead use 25% / 25% / 50% buckets, generalized:
+
+Let N = number of teams in league (rosters count)
+earlyCount = ceil(N * 0.25)
+midCount   = ceil(N * 0.25)
+lateCount  = N - earlyCount - midCount
+
+Assume rank 1 = BEST team.
+Map:
+- If ownerStrengthRank <= lateCount: tier = "late" (Round 1 => "1.07-1.12")
+- Else if <= lateCount + midCount: tier = "mid"  (Round 1 => "1.04-1.06")
+- Else: tier = "early" (Round 1 => "1.01-1.03")
+
+For Round 1:
+- early => "1.01-1.03"
+- mid   => "1.04-1.06"
+- late  => "1.07-1.12"
+
+For Round 2 and Round 3:
+- Use simple halves:
+  early = top half picks (worse teams) / bottom half teams as owners.
+  Or use same bucket method but map to tier="early"/"late".
+- Practical mapping:
+  If ownerStrengthRank > N/2 => "early" else "late"
+
+For Round >= 4:
+- tier = "all" (use “All others” value)
+
+OwnerStrengthRank source order:
+1) Max PF Rank (if implemented)
+2) Your canonical total_score rank (fallback)
+3) Actual points rank (last fallback)
+
+Be explicit in code about which was used; expose in debug.
+
+F) SELECTING SF vs 1QB VALUES
+When valuing a pick:
+- if isSuperflexLeague(league) => use value_sf
+- else use value_1qb
+
+In debug mode, show:
+- chosen column (sf vs 1qb)
+- the exact value row fetched (year/round/tier)
+
+G) OUTPUTS REQUIRED
+Update /api/league/:leagueId/power-rankings to include:
+- picks_value (sum of valued picks owned by each roster)
+- picks_breakdown (by year/round with tier and value)
+- draft_capital_counts (counts by round for display)
+So “Picks” column on BOTH pages is identical and explainable.
+
+========================================================
+7) PLAYER VALUES (IF PRESENT) + COVERAGE
+========================================================
+If your app already has a player values dataset:
+- Ensure SF vs 1QB selection is consistent (same helper and debug output).
+If you do NOT have player value import yet:
+- Keep current player valuation source, but clearly label it.
+- Coverage_pct must be:
+  (% of roster assets with known values) including picks + players
+If no values exist:
+- coverage_pct should be null/"No data" and UI should show “No data” not 0%.
+
+Coverage must NOT be included in the composite score.
+If still shown, rename to “Value Coverage” with tooltip:
+“Percent of roster players+picks that have an imported value.”
+
+========================================================
+8) AGE / WINDOW SCORE (POSITION SPECIFIC)
+========================================================
+Implement a position-specific window score (QB/RB/WR/TE have different peaks).
+This can start simple:
+
+Define peaks:
+- RB prime ~23–26, cliff ~28
+- WR prime ~24–29, cliff ~31
+- TE prime ~25–30, cliff ~33
+- QB prime ~27–33, cliff ~35
+
+Compute for each team:
+- based on starters (or starters + top bench at that position):
+  window_value = aggregate of positional scores (0–100)
+
+Return window_value raw and percentile-normalized window_score for weighting.
+
+========================================================
+9) FIX THE CURRENT “MAIN PAGE ≠ EDGE ENGINE” BUG WITH A DEBUG ASSERTION
+========================================================
+Add a debug toggle (?debug=1) that:
+- Prints which endpoint is used by each view
+- Prints the first team row JSON from each view
+- Asserts equality for key fields:
+  starters_value, bench_value, picks_value, total_score, rank
+
+If mismatch, show a diff of which field differs.
+
+========================================================
+10) ACCEPTANCE TESTS (MUST PASS)
+========================================================
+A) For the same leagueId + season:
+- main Talent Rankings and Edge Engine table show identical:
+  starters, bench, picks, total, rank
+
+B) In an SF league:
+- picks_value must use value_sf (prove in debug mode)
+In a non-SF league:
+- picks_value must use value_1qb
+
+C) Picks must show for ALL teams, and total pick value must be >0 if values exist.
+
+D) If draft_pick_values table is empty:
+- picks_value must be “No data” not 0, and UI must warn.
+
+E) No number formatting crashes anywhere.
+
+========================================================
+11) DELIVERABLES
+========================================================
+- Canonical server power rankings engine + endpoint
+- Draft pick values import pipeline (CSV → DB) with verification logs
+- Pick tier estimation using 25/25/50 bucket logic for round 1
+- SF detection based on roster_positions
+- Unified UI consumption of canonical endpoint (no duplicate scoring)
+- Debug mode with payload inspection + equality assertion
+- Sorting on all columns in rankings tables
+
+BEGIN IMPLEMENTATION NOW:
+1) Identify both current ranking code paths and remove duplication.
+2) Implement canonical endpoint.
+3) Implement/import draft pick values table + script.
+4) Integrate pick valuation into canonical endpoint.
+5) Update both views to consume the canonical endpoint and verify matching.
+
+Do not stop at “planning”. Implement, run, verify, and summarize file changes + verification steps.
