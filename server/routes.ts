@@ -199,6 +199,138 @@ async function withConcurrencyLimit<T>(
   }
 }
 
+// Sync season summaries from roster data (regular season standings)
+async function syncSeasonSummariesFromRosters(
+  leagueId: string, 
+  season: number, 
+  rostersData: any[]
+): Promise<void> {
+  // Sort rosters by wins (desc), then by fpts (desc) for regular season rank
+  const sorted = [...rostersData].sort((a, b) => {
+    const aWins = a.settings?.wins || 0;
+    const bWins = b.settings?.wins || 0;
+    if (bWins !== aWins) return bWins - aWins;
+    const aFpts = a.settings?.fpts || 0;
+    const bFpts = b.settings?.fpts || 0;
+    return bFpts - aFpts;
+  });
+
+  for (let i = 0; i < sorted.length; i++) {
+    const roster = sorted[i];
+    const ownerId = roster.owner_id;
+    if (!ownerId) continue;
+
+    await cache.upsertSeasonSummary({
+      league_id: leagueId,
+      user_id: ownerId,
+      season,
+      roster_id: roster.roster_id,
+      regular_rank: i + 1,
+      wins: roster.settings?.wins || 0,
+      losses: roster.settings?.losses || 0,
+      ties: roster.settings?.ties || 0,
+      pf: roster.settings?.fpts || 0,
+      pa: roster.settings?.fpts_against || 0,
+      source: "roster_settings",
+    });
+  }
+}
+
+// Sync trophies from winners bracket data (1st, 2nd, 3rd place)
+async function syncTrophiesFromBracket(
+  leagueId: string,
+  season: number,
+  bracketData: any[]
+): Promise<void> {
+  if (!bracketData || bracketData.length === 0) return;
+
+  // Find championship match (round with highest r value and m=1)
+  const maxRound = Math.max(...bracketData.map((m: any) => m.r || 0));
+  const championship = bracketData.find((m: any) => m.r === maxRound && m.m === 1);
+  
+  if (!championship) return;
+
+  // Get winner and loser of championship
+  const winnerId = championship.w;
+  const loserId = championship.l;
+
+  // Find 3rd place match (typically m=2 in same round or a consolation bracket)
+  const thirdPlaceMatch = bracketData.find((m: any) => m.r === maxRound && m.m === 2);
+
+  // Get rosters to map roster_id to owner_id
+  const rosters = await cache.getRostersForLeague(leagueId);
+  const rosterToOwner = new Map<number, string>();
+  for (const r of rosters || []) {
+    if (r.owner_id) rosterToOwner.set(r.roster_id, r.owner_id);
+  }
+
+  // Update 1st place (Champion)
+  if (winnerId && rosterToOwner.has(winnerId)) {
+    const ownerId = rosterToOwner.get(winnerId)!;
+    const existing = await cache.getSeasonSummary(leagueId, ownerId, season);
+    await cache.upsertSeasonSummary({
+      league_id: leagueId,
+      user_id: ownerId,
+      season,
+      roster_id: winnerId,
+      regular_rank: existing?.regular_rank || null,
+      finish_place: 1,
+      playoff_finish: "Champion",
+      wins: existing?.wins || 0,
+      losses: existing?.losses || 0,
+      ties: existing?.ties || 0,
+      pf: existing?.pf || 0,
+      pa: existing?.pa || 0,
+      source: "bracket",
+    });
+  }
+
+  // Update 2nd place (Runner-up)
+  if (loserId && rosterToOwner.has(loserId)) {
+    const ownerId = rosterToOwner.get(loserId)!;
+    const existing = await cache.getSeasonSummary(leagueId, ownerId, season);
+    await cache.upsertSeasonSummary({
+      league_id: leagueId,
+      user_id: ownerId,
+      season,
+      roster_id: loserId,
+      regular_rank: existing?.regular_rank || null,
+      finish_place: 2,
+      playoff_finish: "Runner-up",
+      wins: existing?.wins || 0,
+      losses: existing?.losses || 0,
+      ties: existing?.ties || 0,
+      pf: existing?.pf || 0,
+      pa: existing?.pa || 0,
+      source: "bracket",
+    });
+  }
+
+  // Update 3rd place
+  if (thirdPlaceMatch) {
+    const thirdPlaceWinner = thirdPlaceMatch.w;
+    if (thirdPlaceWinner && rosterToOwner.has(thirdPlaceWinner)) {
+      const ownerId = rosterToOwner.get(thirdPlaceWinner)!;
+      const existing = await cache.getSeasonSummary(leagueId, ownerId, season);
+      await cache.upsertSeasonSummary({
+        league_id: leagueId,
+        user_id: ownerId,
+        season,
+        roster_id: thirdPlaceWinner,
+        regular_rank: existing?.regular_rank || null,
+        finish_place: 3,
+        playoff_finish: "3rd",
+        wins: existing?.wins || 0,
+        losses: existing?.losses || 0,
+        ties: existing?.ties || 0,
+        pf: existing?.pf || 0,
+        pa: existing?.pa || 0,
+        source: "bracket",
+      });
+    }
+  }
+}
+
 // Compute league groups by following previous_league_id chains
 async function computeLeagueGroups(userId: string): Promise<void> {
   const leagues = await cache.getLeaguesForUser(userId);
@@ -1373,6 +1505,129 @@ export async function registerRoutes(
       if (e instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid input" });
       }
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // POST /api/sync/history - Sync full historical data by following previous_league_id chain
+  app.post("/api/sync/history", async (req, res) => {
+    try {
+      if (getStorageMode() !== "postgres") {
+        return res.status(503).json({
+          message: "Sync is temporarily unavailable in fallback mode.",
+          degraded: true,
+        });
+      }
+
+      const { username, league_id } = req.body;
+      if (!username && !league_id) {
+        return res.status(400).json({ message: "Either username or league_id required" });
+      }
+
+      // Get starting league(s)
+      let leagueIds: string[] = [];
+      if (league_id) {
+        leagueIds = [league_id];
+      } else if (username) {
+        const userLeagues = await cache.getLeaguesForUser(username);
+        leagueIds = userLeagues.map(l => l.league_id);
+      }
+
+      const results: { league_id: string; seasons_synced: number; chain_depth: number }[] = [];
+      const MAX_CHAIN_DEPTH = 5;
+
+      for (const startLeagueId of leagueIds) {
+        let currentLeagueId: string | null = startLeagueId;
+        let chainDepth = 0;
+        const visited = new Set<string>();
+
+        while (currentLeagueId && chainDepth < MAX_CHAIN_DEPTH) {
+          if (visited.has(currentLeagueId)) break;
+          visited.add(currentLeagueId);
+
+          try {
+            // Fetch league info from Sleeper API
+            const leagueRes: Response = await fetch(`${BASE}/league/${currentLeagueId}`);
+            if (!leagueRes.ok) break;
+            const leagueData: any = await leagueRes.json();
+            
+            // Cache the league if not already cached (use empty userId for historical sync)
+            await cache.upsertLeague("", {
+              league_id: currentLeagueId,
+              name: leagueData.name || "Unknown League",
+              season: leagueData.season,
+              sport: leagueData.sport || "nfl",
+              total_rosters: leagueData.total_rosters || 12,
+              status: leagueData.status || "complete",
+              previous_league_id: leagueData.previous_league_id || null,
+              raw_json: JSON.stringify(leagueData),
+            });
+
+            // Fetch rosters for this season
+            const rostersRes = await fetch(`${BASE}/league/${currentLeagueId}/rosters`);
+            if (rostersRes.ok) {
+              const rostersData: any[] = await rostersRes.json();
+              for (const roster of rostersData) {
+                await cache.upsertRoster({
+                  roster_id: roster.roster_id,
+                  owner_id: roster.owner_id || "",
+                  league_id: currentLeagueId,
+                  fpts: roster.settings?.fpts || 0,
+                  fpts_against: roster.settings?.fpts_against || 0,
+                  wins: roster.settings?.wins || 0,
+                  losses: roster.settings?.losses || 0,
+                  ties: roster.settings?.ties || 0,
+                });
+              }
+              
+              // Sync season summaries from roster standings
+              await syncSeasonSummariesFromRosters(currentLeagueId, leagueData.season, rostersData);
+            }
+
+            // Fetch users for this season
+            const usersRes = await fetch(`${BASE}/league/${currentLeagueId}/users`);
+            if (usersRes.ok) {
+              const usersData: any[] = await usersRes.json();
+              for (const user of usersData) {
+                await cache.upsertLeagueUser({
+                  user_id: user.user_id,
+                  league_id: currentLeagueId,
+                  display_name: user.display_name || user.user_id,
+                  team_name: user.metadata?.team_name || null,
+                });
+              }
+            }
+
+            // Fetch winners bracket for standings (trophies)
+            const bracketRes = await fetch(`${BASE}/league/${currentLeagueId}/winners_bracket`);
+            if (bracketRes.ok) {
+              const bracketData: any[] = await bracketRes.json();
+              // Process bracket to determine final standings (1st, 2nd, 3rd)
+              await syncTrophiesFromBracket(currentLeagueId, leagueData.season, bracketData);
+            }
+
+            chainDepth++;
+            currentLeagueId = leagueData.previous_league_id || null;
+          } catch (err) {
+            console.error(`Error syncing league ${currentLeagueId}:`, err);
+            break;
+          }
+        }
+
+        results.push({
+          league_id: startLeagueId,
+          seasons_synced: chainDepth,
+          chain_depth: chainDepth,
+        });
+      }
+
+      res.json({
+        message: "Historical sync complete",
+        results,
+        total_leagues: leagueIds.length,
+      });
+    } catch (e) {
+      console.error("Historical sync error:", e);
       res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });

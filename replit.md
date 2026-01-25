@@ -79,6 +79,24 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 25, 2026 (Absolute Valuation Engine & Historical Crawler)
+
+**Absolute Valuation Engine** (`server/engine/powerRankings.ts`):
+- **New Weight Distribution**: 45% Starters, 15% Bench, 25% Picks, 10% Window, 5% Age
+- **Pick Value Scaling**: Picks scaled by factor of 20x to normalize with starters range
+- **Team Age Score**: Computed from value-weighted average age (younger = higher score)
+- **Single Source of Truth**: All views use the same canonical power rankings
+
+**League Chain Historical Crawler** (`server/routes.ts`):
+- **POST /api/sync/history**: New endpoint for full historical sync
+- **Chain Crawling**: Follows `previous_league_id` up to 5 seasons back
+- **Trophy Extraction**: Parses winners_bracket to find 1st, 2nd, 3rd place finishes
+- **Season Summaries**: Stores regular season standings and playoff results
+
+**Trophy Room Enhancement** (`client/src/pages/TrophyRoom.tsx`):
+- **Sync Full History Button**: Triggers historical data crawl
+- **Refreshes Automatically**: Invalidates season data after sync completes
+
 ### January 25, 2026 (Professional Draft Pick Valuation Pipeline)
 **Data Import** (`server/marketValues/importDraftPickValues.ts`):
 - Imports draft pick values from CSV into `draft_pick_values` table

@@ -2,11 +2,14 @@ import { useParams } from "wouter";
 import { Layout } from "@/components/Layout";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Trophy, Target, History, TrendingUp, Loader2 } from "lucide-react";
+import { Trophy, Target, History, TrendingUp, Loader2, RefreshCw } from "lucide-react";
 import { useSleeperOverview, useH2h, useSeasonSummaries } from "@/hooks/use-sleeper";
 import { motion } from "framer-motion";
 import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 function fmtNum(v: unknown, decimals = 1, fallback = "—"): string {
   if (v == null) return fallback;
@@ -25,6 +28,8 @@ function fmtPct(v: unknown, decimals = 1, fallback = "—"): string {
 export default function TrophyRoom() {
   const { username } = useParams<{ username: string }>();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: overview, isLoading: loadingOverview } = useSleeperOverview(username);
   
@@ -33,6 +38,32 @@ export default function TrophyRoom() {
   
   const { data: h2hData, isLoading: loadingH2H } = useH2h(activeGroupId, username);
   const { data: seasonsData, isLoading: loadingSeasons } = useSeasonSummaries(activeGroupId, username);
+
+  const syncHistoryMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/sync/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      if (!res.ok) throw new Error("Failed to sync history");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "History Synced",
+        description: `Synced ${data.total_leagues} leagues with historical data`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/group", activeGroupId, "seasons", username] });
+    },
+    onError: () => {
+      toast({
+        title: "Sync Failed",
+        description: "Could not sync historical data",
+        variant: "destructive",
+      });
+    },
+  });
 
   if (loadingOverview) {
     return (
@@ -54,12 +85,28 @@ export default function TrophyRoom() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-6"
         >
-          <div className="flex items-center gap-3">
-            <Trophy className="w-8 h-8 text-yellow-500" />
-            <div>
-              <h1 className="text-3xl font-bold">Trophy Room</h1>
-              <p className="text-muted-foreground">Your dynasty legacy and historical achievements</p>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <Trophy className="w-8 h-8 text-yellow-500" />
+              <div>
+                <h1 className="text-3xl font-bold">Trophy Room</h1>
+                <p className="text-muted-foreground">Your dynasty legacy and historical achievements</p>
+              </div>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => syncHistoryMutation.mutate()}
+              disabled={syncHistoryMutation.isPending}
+              data-testid="button-sync-history"
+            >
+              {syncHistoryMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              Sync Full History
+            </Button>
           </div>
 
           {groups.length > 1 && (

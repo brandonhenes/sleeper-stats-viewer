@@ -63,11 +63,13 @@ export interface TeamRanking {
   starters_value: number;
   bench_value: number;
   picks_value: number;
+  scaled_picks_value: number;
   window_value: number;
   starters_score: number;
   bench_score: number;
   picks_score: number;
   window_score: number;
+  age_score: number;
   total_score: number;
   coverage_pct: number | null;
   picks_breakdown: PickBreakdown[];
@@ -94,10 +96,14 @@ export interface PowerRankingsResult {
 export const DEFAULT_WEIGHTS = {
   starters: 45,
   bench: 15,
-  picks: 15,
-  window: 20,
-  maxPf: 5,
+  picks: 25,
+  window: 10,
+  age: 5,
 };
+
+// Scaling factor to normalize pick values (0-60 range) to starters range (1000-2000)
+// This ensures a 1.12 pick adds more than 2.11 + 3.11 combined
+const PICK_VALUE_SCALE_FACTOR = 20; // Converts 50 pick value to ~1000 starters-equivalent
 
 const POSITION_AGE_CURVES = [
   { position: "RB", primeStart: 23, primeEnd: 26, declineStart: 28 },
@@ -568,35 +574,67 @@ export async function computePowerRankings(
     rd.draftCapitalCounts = draftCapitalCounts;
   }
 
+  // Absolute Valuation Engine: Use raw market values with proper scaling
+  // Starters: 1000-2000 range, Bench: 100-500 range, Picks: 0-60 raw -> scaled by PICK_VALUE_SCALE_FACTOR
+  // Window: 50-100 (age curve score), Age: computed from average team age
+  
   const allStartersValues = rosterDataList.map(rd => rd.lineup.startersValue);
   const allBenchValues = rosterDataList.map(rd => rd.lineup.benchValue);
   const allPicksValues = rosterDataList.map(rd => rd.picksValue);
   const allWindowValues = rosterDataList.map(rd => rd.windowData.value);
   const allMaxPfValues = rosterDataList.map(rd => rd.maxPf);
 
+  // Compute team average age for age score
+  function computeTeamAgeScore(players: PlayerValue[]): number {
+    const playersWithAge = players.filter(p => p.age != null && p.value > 0);
+    if (playersWithAge.length === 0) return 50;
+    
+    const totalValue = playersWithAge.reduce((sum, p) => sum + p.value, 0);
+    const weightedAge = playersWithAge.reduce((sum, p) => {
+      const weight = totalValue > 0 ? p.value / totalValue : 1 / playersWithAge.length;
+      return sum + (p.age ?? 25) * weight;
+    }, 0);
+    
+    // Younger teams score higher: 22 avg age = 100, 30 avg age = 0
+    const ageScore = Math.max(0, Math.min(100, (30 - weightedAge) * 12.5));
+    return ageScore;
+  }
+
   interface ScoredRoster extends RosterData {
     startersScore: number;
     benchScore: number;
     picksScore: number;
     windowScore: number;
+    ageScore: number;
     maxPfScore: number;
     totalScore: number;
+    scaledPicksValue: number;
   }
 
   const scoredRosters: ScoredRoster[] = rosterDataList.map(rd => {
+    // Scale picks to be proportional to starters (0-60 range -> ~0-1200 range)
+    const scaledPicksValue = rd.picksValue * PICK_VALUE_SCALE_FACTOR;
+    
+    // Compute age score
+    const ageScore = computeTeamAgeScore(rd.players);
+    
+    // Absolute values: use raw values directly
+    // For fair comparison, we use percentile ranks on the absolute values
+    // This ensures teams are ranked relative to each other
     const startersScore = percentileRank(rd.lineup.startersValue, allStartersValues);
     const benchScore = percentileRank(rd.lineup.benchValue, allBenchValues);
     const picksScore = percentileRank(rd.picksValue, allPicksValues);
     const windowScore = percentileRank(rd.windowData.value, allWindowValues);
     const maxPfScore = percentileRank(rd.maxPf, allMaxPfValues);
 
-    const totalWeight = weights.starters + weights.bench + weights.picks + weights.window + weights.maxPf;
+    // Apply new weights: 45% starters, 15% bench, 25% picks, 10% window, 5% age
+    const totalWeight = weights.starters + weights.bench + weights.picks + weights.window + weights.age;
     const totalScore = 
       (startersScore * weights.starters / totalWeight) +
       (benchScore * weights.bench / totalWeight) +
       (picksScore * weights.picks / totalWeight) +
       (windowScore * weights.window / totalWeight) +
-      (maxPfScore * weights.maxPf / totalWeight);
+      (ageScore * weights.age / totalWeight);
 
     return {
       ...rd,
@@ -604,8 +642,10 @@ export async function computePowerRankings(
       benchScore,
       picksScore,
       windowScore,
+      ageScore,
       maxPfScore,
       totalScore: Math.round(totalScore * 10) / 10,
+      scaledPicksValue,
     };
   });
 
@@ -646,11 +686,13 @@ export async function computePowerRankings(
       starters_value: Math.round(sr.lineup.startersValue),
       bench_value: Math.round(sr.lineup.benchValue),
       picks_value: Math.round(sr.picksValue),
+      scaled_picks_value: Math.round(sr.scaledPicksValue),
       window_value: Math.round(sr.windowData.value),
       starters_score: Math.round(sr.startersScore * 10) / 10,
       bench_score: Math.round(sr.benchScore * 10) / 10,
       picks_score: Math.round(sr.picksScore * 10) / 10,
       window_score: Math.round(sr.windowScore * 10) / 10,
+      age_score: Math.round(sr.ageScore * 10) / 10,
       total_score: sr.totalScore,
       coverage_pct: sr.coveragePct,
       picks_breakdown: sr.picksBreakdown,

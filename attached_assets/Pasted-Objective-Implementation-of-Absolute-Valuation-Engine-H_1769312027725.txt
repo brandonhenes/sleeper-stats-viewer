@@ -1,0 +1,61 @@
+Objective: Implementation of Absolute Valuation Engine & Historical Crawler
+I need a final refactor to unify the app’s scoring and fix the empty Trophy Room. Do not start fresh; refactor the existing code in server/engine/powerRankings.ts, server/routes.ts, and server/cache.ts.
+
+1. Absolute Valuation Math (Updated Weights)
+Refactor computeTeamCompositeValue to use Absolute Market Values (not percentiles).
+
+New Weight Distribution:
+
+45% Starters Value (Optimal lineup raw trade value)
+
+15% Bench Value (Total bench raw trade value)
+
+25% Picks Value (Total draft pick raw trade value from CSV)
+
+10% Window Score (Position-specific age curve score)
+
+5% Team Age adjustment
+
+Additive Logic: Sum these components using raw values from the CSVs.
+
+Normalization: Scale the Pick Values (0–60 range) so they are proportional to the Starters Values (1000–2000 range) before applying weights. A 1.12 pick must always add more to the total than a 2.11 + 3.11.
+
+2. "League Chain" Historical Sync (Trophy Room Fix)
+The Trophy Room is empty because we only have current data. Implement a recursive crawler:
+
+The Chain: In the Sleeper League object, use the previous_league_id to find the previous season.
+
+The Crawl:
+
+Follow the previous_league_id chain back 5 years or until the ID is null.
+
+For each historical season, fetch the Final Standings and Roster Finishes.
+
+Extract 1st, 2nd, and 3rd place "Trophies" and associate them with the user's sleeper_id.
+
+Storage: Save this historical data in the league_history and user_stats tables.
+
+3. Professional Pick Valuation (CSV + Tiering)
+Data Source: Use attached_assets/DynastyTradeValuesDP_Jan2026.csv_-_Sheet1_1769304846012.csv.
+
+Tier Mapping (3/3/6): Assign tiers to future picks based on the original owner’s Max PF Rank:
+
+Early (Bottom 25% of teams): Rank 10-12 in 12-team.
+
+Mid (Next 25% of teams): Rank 7-9.
+
+Late (Top 50% of teams): Rank 1-6.
+
+SF Toggle: Use roster_positions to detect SUPER_FLEX and select the value_sf column; otherwise use value_1qb.
+
+4. UI & Synchronization
+Single Source of Truth: Update the Home Page, Profile, and Edge Engine to all pull from the same /api/league/:leagueId/power-rankings endpoint.
+
+Sync Button: Add a "Sync Full History" button to the Trophy Room that triggers the recursive crawler.
+
+Why this prompt is ready:
+Corrects the "Picks" Bias: By moving to 25% weight and absolute math, your teams with 1st-rounders will no longer be "squashed" by rebuilder teams with 5 picks.
+
+Fixes the Data Gap: The recursive crawler instruction tells the agent exactly how to find your missing trophies.
+
+Unifies the UI: It specifically names the endpoint to ensure the Home page and Edge Engine never show different ranks again.

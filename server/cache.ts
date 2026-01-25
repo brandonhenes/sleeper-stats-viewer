@@ -1121,6 +1121,44 @@ export const cache = {
       });
   },
 
+  async getSeasonSummary(leagueId: string, userId: string, season: number): Promise<{
+    roster_id: number | null;
+    regular_rank: number | null;
+    finish_place: number | null;
+    playoff_finish: string | null;
+    wins: number;
+    losses: number;
+    ties: number;
+    pf: number | null;
+    pa: number | null;
+    source: string | null;
+  } | null> {
+    const result = await getDb().select()
+      .from(schema.league_season_summary)
+      .where(and(
+        eq(schema.league_season_summary.league_id, leagueId),
+        eq(schema.league_season_summary.user_id, userId),
+        eq(schema.league_season_summary.season, season)
+      ))
+      .limit(1);
+    
+    if (result.length === 0) return null;
+    
+    const row = result[0];
+    return {
+      roster_id: row.roster_id,
+      regular_rank: row.regular_rank,
+      finish_place: row.finish_place,
+      playoff_finish: row.playoff_finish,
+      wins: row.wins,
+      losses: row.losses,
+      ties: row.ties,
+      pf: row.pf,
+      pa: row.pa,
+      source: row.source,
+    };
+  },
+
   async testConnection(): Promise<{ ok: boolean; mode: string }> {
     if (!isDbAvailable()) {
       return { ok: true, mode: "no-db" };
