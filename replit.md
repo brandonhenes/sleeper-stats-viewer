@@ -79,6 +79,39 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 26, 2026 (Canonical Player Value Pipeline)
+
+**Player Values Table** (`shared/schema.ts`):
+- New `player_values` table with `value_1qb` and `value_sf` columns
+- Stores canonical FantasyPros dynasty values for dual-mode (1QB/Superflex) lookup
+- Indexed on position for efficient queries
+
+**CSV Importer** (`server/marketValues/importPlayerValues.ts`):
+- Dual-mode support: reads from `server/data/fantasypros_dynasty_1qb.csv` and `server/data/fantasypros_dynasty_sf.csv`
+- Name normalization: removes Jr/Sr/II/III/IV/V suffixes for matching
+- COALESCE upsert: updates without wiping values from other mode
+- Generates `server/data/unmatched_report.csv` for debugging unmatched players
+- Endpoint: `POST /api/debug/import-player-values`
+
+**Player Values Repository** (`server/marketValues/playerValuesRepo.ts`):
+- `inferLeagueMode(settings)`: Detects SF via SUPER_FLEX position or QB count >= 2
+- `getPlayerValuesMap(ids, mode)`: Batch lookup with mode-specific values
+- `getPlayerValuesStatus()`: Global counts (rows, has_1qb, has_sf, last_updated)
+- `getRosterCoverage(leagueId, rosterIds, ownerId)`: Per-roster coverage analysis
+
+**API Endpoints**:
+- `GET /api/player-values/status`: Global player value status
+- `GET /api/league/:leagueId/player-values/coverage`: Per-roster coverage with missing list
+
+**UI Components**:
+- `usePlayerValuesStatus` and `usePlayerValuesCoverage` hooks in `client/src/hooks/use-sleeper.ts`
+- `CoverageWarning` component with View List modal and clipboard copy
+- Integrated into LeagueGroupDetails page with mode badge (1QB/SF)
+
+**Cleanup**:
+- Old CSVs archived to `server/data/_archive/`
+- Legacy import files moved but preserved for reference
+
 ### January 25, 2026 (Absolute Valuation Engine & Historical Crawler)
 
 **Absolute Valuation Engine** (`server/engine/powerRankings.ts`):
