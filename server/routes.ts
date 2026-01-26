@@ -9,6 +9,7 @@ import { randomUUID } from "crypto";
 import { getStorageMode } from "./db";
 import { importMarketValues } from "./marketValues/importMarketValues";
 import { importFromAttachedAsset as importPickValuesFromCSV } from "./marketValues/importDraftPickValues";
+import { getPlayerValuesStatus, getRosterCoverage, inferLeagueMode } from "./marketValues/playerValuesRepo";
 import { getUserPowerForLeague } from "./analytics/power";
 import * as edgeEngine from "./analytics/edgeEngine";
 import type { EdgeEngineResult, PlayerWithValue } from "./analytics/edgeEngine";
@@ -879,6 +880,38 @@ export async function registerRoutes(
           ? "Production database may not be provisioned or accessible. Check deployment database settings."
           : "Database connection failed in development mode.",
       });
+    }
+  });
+
+  // GET /api/player-values/status - Global player values status
+  app.get("/api/player-values/status", async (req, res) => {
+    try {
+      const status = await getPlayerValuesStatus();
+      res.json(status);
+    } catch (e) {
+      console.error("Player values status error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
+    }
+  });
+
+  // GET /api/league/:leagueId/player-values/coverage - Per-roster coverage
+  app.get("/api/league/:leagueId/player-values/coverage", async (req, res) => {
+    try {
+      const { leagueId } = req.params;
+      const { owner_id } = req.query;
+
+      if (!owner_id || typeof owner_id !== "string") {
+        return res.status(400).json({ message: "owner_id query param required" });
+      }
+
+      const league = await cache.getLeagueById(leagueId);
+      const leagueRawJson = league?.raw_json || null;
+
+      const coverage = await getRosterCoverage(leagueId, owner_id, leagueRawJson);
+      res.json(coverage);
+    } catch (e) {
+      console.error("Player values coverage error:", e);
+      res.status(500).json({ message: e instanceof Error ? e.message : "Internal server error" });
     }
   });
 

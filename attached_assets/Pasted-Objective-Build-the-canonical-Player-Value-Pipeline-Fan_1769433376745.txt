@@ -1,0 +1,501 @@
+Objective
+
+Build the canonical Player Value Pipeline (FantasyPros → Postgres) supporting both 1QB and Superflex, wire it into the app with coverage warnings, and then purge/disable any legacy/duplicate value math so the repo cannot show contradictory numbers.
+
+Non-Negotiables
+
+This is a Postgres + Drizzle repo. Do NOT use SQLite.
+
+Values must support dual-mode:
+
+value_1qb for 1QB leagues
+
+value_sf for Superflex/2QB leagues
+
+No UI screen should compute trade values locally.
+
+After cleanup, any legacy value endpoint must fail loudly (prefer 410 Gone) so “zombie logic” can’t survive.
+
+Phase 1 — Add player_values table (Postgres/Drizzle)
+1.1 Update schema
+
+File: shared/schema.ts
+
+Add a new table:
+
+export const player_values = pgTable("player_values", {
+  player_id: text("player_id").primaryKey(), // Sleeper player_id
+  full_name: text("full_name"),              // from players_master for debugging
+  position: text("position"),                // normalized
+  value_1qb: integer("value_1qb"),           // null means not imported/matched
+  value_sf: integer("value_sf"),             // null means not imported/matched
+  rank_dynasty: integer("rank_dynasty"),     // optional (if CSV contains rank)
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_player_values_position").on(table.position),
+]);
+
+
+Notes:
+
+Keep timestamps consistent with repo style: bigint ms (like other tables).
+
+value_1qb and value_sf are nullable on purpose (partial import is allowed).
+
+1.2 Apply migration
+
+Run:
+
+npm run db:push
+
+
+Verification query (optional, but do it):
+
+Confirm table exists and columns match.
+
+Phase 2 — Create robust importer (FantasyPros → DB, dual-mode)
+2.1 Add expected CSV input files
+
+Create folder if missing:
+
+server/data/
+
+Agent should expect exactly these inputs:
+
+server/data/fantasypros_dynasty_1qb.csv
+
+server/data/fantasypros_dynasty_sf.csv
+
+If one is missing, importer should:
+
+still run
+
+update only the mode that exists
+
+NOT wipe out the other mode in DB
+
+2.2 Create importer module
+
+Create file:
+
+server/marketValues/importPlayerValues.ts
+
+This importer must:
+
+Load players_master (Sleeper directory) via cache.getAllPlayers()
+
+Build matching index: normalizeName(full_name) + "|" + normalizePos(position) → player_id
+
+Parse CSV(s) robustly (handle quoted commas, variable column names)
+
+Match each FantasyPros row to a Sleeper player_id
+
+Merge results across both files onto a single in-memory object per player_id
+
+Upsert into player_values in batches (500) with Drizzle
+
+Write server/data/unmatched_report.csv with detailed rows:
+
+mode (1qb/sf)
+
+raw_name, raw_pos, raw_team, raw_value
+
+normalized_name, normalized_pos
+
+reason (e.g. “no match in players_master index”)
+
+Optional overrides:
+
+read server/data/value_overrides.json
+
+format: { "normalizedname|POS": "sleeper_player_id" }
+
+overrides should win over the normal index mapping
+
+2.3 Name normalization functions (use exactly)
+
+In importer:
+
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "")
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizePos(pos: string): string {
+  const p = (pos || "").toUpperCase().trim();
+  if (p === "DST" || p === "D/ST") return "DEF";
+  return p;
+}
+
+2.4 CSV parsing requirements (do not assume column names)
+
+FantasyPros exports can vary. The parser must:
+
+detect header row
+
+locate columns using fuzzy matching:
+
+name: “player”, “name”
+
+position: “pos”, “position”
+
+team: “team” (optional)
+
+value: “value”, “trade value”, “dynasty value”
+
+rank: “rank”, “overall rank” (optional)
+
+Implementation notes:
+
+If value includes commas or formatting, strip non-numeric except .:
+
+Number(String(v).replace(/[^0-9.]/g, ""))
+
+Round values to integer for DB (FantasyPros values are effectively integer-ish):
+
+Math.round(value)
+
+2.5 Upsert rules (critical to avoid wiping the other mode)
+
+When upserting:
+
+if importing only 1QB, do NOT overwrite existing value_sf
+
+if importing only SF, do NOT overwrite existing value_1qb
+
+Approach:
+
+Build a merged map per player_id first (preferred)
+
+Additionally use SQL COALESCE safety in the upsert so nulls don’t wipe:
+
+Pseudo-Drizzle pattern:
+
+onConflictDoUpdate where:
+
+value_1qb = COALESCE(EXCLUDED.value_1qb, player_values.value_1qb)
+
+value_sf = COALESCE(EXCLUDED.value_sf, player_values.value_sf)
+
+full_name/position should update from Sleeper directory (safe)
+
+updated_at always updates
+
+2.6 Batching
+
+Insert/update in batches of 500:
+
+slice the values array
+
+upsert each batch
+
+log progress
+
+2.7 Add a package script
+
+Update package.json scripts:
+
+"values:import": "tsx server/marketValues/importPlayerValues.ts"
+
+
+Run:
+
+npm run values:import
+
+
+Output should log:
+
+total rows read from 1qb CSV
+
+total rows read from sf CSV
+
+total matched player_ids
+
+unmatched counts by mode
+
+DB rows upserted
+
+location of unmatched_report.csv
+
+Phase 3 — Add APIs for status + per-roster coverage (for UI warnings)
+3.1 Add routes in server/routes.ts
+
+This repo uses express routes mainly inside server/routes.ts, so implement these there.
+
+Endpoint A — Global status
+
+GET /api/player-values/status
+
+Return:
+
+{
+  "rows_in_player_values": 12345,
+  "has_1qb": 12001,
+  "has_sf": 11890,
+  "last_updated_at": 1730000000000
+}
+
+
+Implementation details:
+
+rows_in_player_values: count(*)
+
+has_1qb: count where value_1qb IS NOT NULL
+
+has_sf: count where value_sf IS NOT NULL
+
+last_updated_at: max(updated_at)
+
+Endpoint B — Per-league roster coverage (this powers the UI warning)
+
+GET /api/league/:leagueId/player-values/coverage?owner_id=...
+
+Return:
+
+{
+  "league_id": "123",
+  "mode": "sf",
+  "total_players": 28,
+  "matched_players": 26,
+  "coverage_pct": 92.9,
+  "missing": [
+    { "player_id": "4049", "full_name": "Some Guy", "position": "WR" }
+  ]
+}
+
+Mode detection (SF vs 1QB)
+
+Use league row from DB (cache.getLeague(leagueId) or equivalent).
+Parse league.raw_json (it’s stored as string).
+
+Rules:
+
+If roster_positions includes "SUPER_FLEX" → mode = "sf"
+
+Else if roster_positions contains "QB" 2+ times → mode = "sf"
+
+Else → mode = "1qb"
+
+If raw_json is missing or invalid JSON:
+
+default to "1qb" but include a note in debug logs
+
+Coverage computation
+
+Steps:
+
+query roster player_ids from roster_players for (leagueId, owner_id)
+
+join players_master to get names/positions
+
+left join player_values for values
+
+matched means:
+
+mode sf: player_values.value_sf IS NOT NULL
+
+mode 1qb: player_values.value_1qb IS NOT NULL
+
+missing list should include:
+
+player_id, full_name, position
+
+Sort missing list by position then name.
+
+Phase 4 — Wire values into the engine / scoring logic (no more client math)
+
+Even if the full “Decision Engine” endpoint isn’t built yet, you MUST ensure that any “team value” computation uses the DB player_values table.
+
+4.1 Create a single helper for value lookup
+
+Create file:
+
+server/marketValues/playerValuesRepo.ts
+
+It should export functions:
+
+inferLeagueMode(leagueRawJson: string | null): "sf" | "1qb"
+
+getPlayerValuesMap(playerIds: string[]): Map<player_id, { value_1qb, value_sf }>
+
+getRosterCoverage(leagueId, ownerId) (optional reuse for API endpoint)
+
+Goal: avoid scattering joins all over routes.
+
+4.2 Integrate into any roster valuation code path
+
+Search existing code for:
+
+“draftCapitalScore”
+
+“weighted by round”
+
+any “value” aggregation
+
+When computing roster value:
+
+determine mode once
+
+for each player_id:
+
+value = mode === "sf" ? value_sf : value_1qb
+
+if null → 0 and count missing
+
+Return missing count as part of debug output.
+
+Phase 5 — UI: show warning + “View List” modal (Unmatched UI)
+5.1 Add hook
+
+File: client/src/hooks/use-sleeper.ts
+
+Add:
+
+usePlayerValuesStatus()
+
+usePlayerValuesCoverage(leagueId, ownerId)
+
+Use react-query, similar to existing hooks.
+
+5.2 Display coverage warning in the league “cockpit”
+
+The most relevant screen today is client/src/pages/LeagueGroupDetails.tsx because it already hosts the “tabs/cockpit” style.
+
+Where:
+
+In the “overview” or “teams” tab header area (top of the page), show an Alert if coverage_pct < 98.
+
+UI:
+
+Alert text: Warning: {100-coverage}% of your roster has no trade value match.
+
+Button: View List opens a dialog/modal listing missing players
+
+Modal contents:
+
+Table columns: Position, Player, Player ID
+
+Provide copy button to copy player_ids (optional but helpful)
+
+If user_id/owner_id is not available in that view:
+
+you can use overviewData to determine the current user and roster mapping (the app already does this in other features)
+
+worst case: show global status only and defer per-roster coverage until the league page includes owner_id
+
+Phase 6 — CLEANUP: kill zombie logic (FORCING FUNCTIONS)
+
+This repo does NOT have server/analytics/power.ts in the current code snapshot. Server logic is centralized in server/routes.ts. So cleanup means:
+
+6.1 Identify all “value brains” and duplicates
+
+Run searches (agent should do this, not guess):
+
+grep -RIn "draftCapitalScore|first_round_picks_acquired|draft-capital|trade value|market values|power rank|weighted" server client shared
+
+
+Also search for endpoints that compute rankings/picks/values in multiple ways:
+
+/api/league/:leagueId/draft-capital
+
+/api/league/:leagueId/scouting/draft-capital
+
+/api/league/:leagueId/draft-capital/all
+
+These are currently separate and likely inconsistent. They are not player-trade-values, but they are part of “split brain” for pick valuation and team strength.
+
+6.2 Deprecate legacy endpoints (410 Gone) once the new path exists
+
+For any endpoint that returns “value/power/picks weights” that conflicts with Decision Engine or player_values, do one of:
+
+Option A (preferred): Replace handler body with 410:
+
+return res.status(410).json({ message: "Deprecated. Use Decision Engine output." });
+
+
+Option B: keep it but rename route path to /api/legacy/... and update client not to call it.
+
+6.3 Remove client-side usage of deprecated endpoints
+
+Search client/src for fetches to old endpoints and delete or replace calls.
+
+If a screen still needs “draft capital” temporarily:
+
+it must come from the new engine or DB-backed pick values later
+
+not from “3/2/1 weights” logic
+
+6.4 Delete or archive old CSVs
+
+Enforce that importer reads ONLY:
+
+server/data/fantasypros_dynasty_1qb.csv
+
+server/data/fantasypros_dynasty_sf.csv
+
+Everything else under server/data or attached_assets that looks like values should be moved to:
+
+server/data/_archive/
+
+This prevents the agent (or future you) from accidentally importing the wrong file.
+
+6.5 Fix obvious duplication bug (bonus but important)
+
+In server/routes.ts, there appear to be duplicated blocks around /api/targets (same comment repeated). Ensure there is exactly one route registration per path+method. Duplicate route handlers cause unpredictable behavior and are classic zombie logic.
+
+Phase 7 — Acceptance Tests (must pass before marking done)
+7.1 Importer
+
+Running npm run values:import twice should:
+
+not create duplicates (PK prevents)
+
+update updated_at
+
+not wipe values in the other mode if one file missing
+
+7.2 Status endpoint
+
+/api/player-values/status returns counts and last_updated_at
+
+counts are non-zero after import
+
+7.3 Coverage endpoint
+
+Pick a real leagueId + owner_id:
+
+coverage returns mode correctly (sf vs 1qb)
+
+missing list matches actual roster players with null values
+
+coverage_pct is correct math
+
+7.4 UI warning
+
+When coverage < 98%, user sees warning + can open modal listing missing players
+
+When coverage >= 98%, warning is hidden
+
+7.5 Zombie logic forcing functions
+
+Any deprecated endpoint returns 410 (not 200) once replaced
+
+Client no longer calls 410 endpoints (no console spam)
+
+Deliverables Summary (What “Done” means)
+
+player_values table exists in Postgres and is populated
+
+importer merges 1QB + SF into the same DB rows
+
+status + coverage endpoints exist and work
+
+UI shows coverage warning + missing list
+
+legacy/duplicate value logic is removed or 410’d
+
+repo now has one authoritative player value source (DB), not 3 competing ones

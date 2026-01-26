@@ -180,6 +180,19 @@ export const player_aliases = pgTable("player_aliases", {
   note: text("note"),
 });
 
+// Canonical player values: FantasyPros dynasty values (1QB and Superflex)
+export const player_values = pgTable("player_values", {
+  player_id: text("player_id").primaryKey(), // Sleeper player_id
+  full_name: text("full_name"),              // from players_master for debugging
+  position: text("position"),                // normalized
+  value_1qb: integer("value_1qb"),           // null means not imported/matched
+  value_sf: integer("value_sf"),             // null means not imported/matched
+  rank_dynasty: integer("rank_dynasty"),     // optional (if CSV contains rank)
+  updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_player_values_position").on(table.position),
+]);
+
 // Draft pick values chart for dynasty trade valuations
 export const draft_pick_values = pgTable("draft_pick_values", {
   id: serial("id").primaryKey(),

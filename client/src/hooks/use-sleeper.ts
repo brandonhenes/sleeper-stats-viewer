@@ -1116,3 +1116,46 @@ export function usePowerRankings(
     staleTime: 1000 * 60 * 5, // Cache for 5 minutes
   });
 }
+
+interface PlayerValuesStatus {
+  rows_in_player_values: number;
+  has_1qb: number;
+  has_sf: number;
+  last_updated_at: number | null;
+}
+
+export function usePlayerValuesStatus() {
+  return useQuery<PlayerValuesStatus>({
+    queryKey: ["/api/player-values/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/player-values/status");
+      if (!res.ok) throw new Error("Failed to fetch player values status");
+      return res.json();
+    },
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
+}
+
+interface PlayerValuesCoverage {
+  league_id: string;
+  mode: "sf" | "1qb";
+  total_players: number;
+  matched_players: number;
+  coverage_pct: number;
+  missing: Array<{ player_id: string; full_name: string; position: string }>;
+}
+
+export function usePlayerValuesCoverage(leagueId: string | undefined, ownerId: string | undefined) {
+  return useQuery<PlayerValuesCoverage>({
+    queryKey: ["/api/league", leagueId, "player-values/coverage", ownerId],
+    queryFn: async () => {
+      if (!leagueId || !ownerId) throw new Error("Missing leagueId or ownerId");
+      const url = `/api/league/${encodeURIComponent(leagueId)}/player-values/coverage?owner_id=${encodeURIComponent(ownerId)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch coverage");
+      return res.json();
+    },
+    enabled: !!leagueId && !!ownerId,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+  });
+}

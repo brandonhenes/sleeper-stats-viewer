@@ -22,6 +22,7 @@ import { TeamsSection } from "@/components/TeamsSection";
 import { TradesSection } from "@/components/TradesSection";
 import { TradeTargetsModal } from "@/components/TradeTargetsModal";
 import { EdgeEngineSection } from "@/components/EdgeEngineSection";
+import { CoverageWarning } from "@/components/CoverageWarning";
 
 function fmtNum(v: unknown, decimals = 1, fallback = "—"): string {
   if (v == null) return fallback;
@@ -201,6 +202,12 @@ export default function LeagueGroupDetails() {
 
         {/* ABOVE THE FOLD: Season Result + Quick Actions */}
         <div className="max-w-6xl mx-auto p-6">
+          {/* Coverage Warning */}
+          <CoverageWarning 
+            leagueId={activeLeagueId} 
+            ownerId={overviewData?.user?.user_id}
+          />
+          
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
