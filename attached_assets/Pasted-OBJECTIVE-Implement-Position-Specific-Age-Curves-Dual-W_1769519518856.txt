@@ -1,0 +1,314 @@
+OBJECTIVE: Implement Position-Specific Age Curves + Dual Window Scores + Dynamic Team Archetypes (Decision Engine v1)
+
+We are building the intelligence layer of the app. The app already fetches Sleeper data; now we need to interpret roster construction into:
+1) Player-level Age Curve Status (score + zone + traffic-light color + label)
+2) Team-level Window Scores (VALUE-WEIGHTED; both “core assets” and “total roster”)
+3) Team Archetype classification that feels right to humans, including “Productive Struggle”
+
+IMPORTANT REPO FACTS
+- Server routes are primarily in: server/routes.ts
+- DB/Drizzle schema is in: shared/schema.ts (Postgres/Drizzle)
+- Sleeper player directory is stored in players_master and accessed via cache.getAllPlayers()
+- players_master.age is an integer from Sleeper. We should expose that fact in payload.
+
+DEPENDENCY
+This assumes canonical trade values exist in DB:
+- player_values table with value_1qb and value_sf
+If values are missing, default player_value = 0 and track coverage.
+
+──────────────────────────────────────────────────────────────────────────────
+PART A — AGE CURVE ENGINE (server/engine/ageCurves.ts)
+
+Goal: translate (position, ageInteger) into a dynasty status. Ages are integer-snapped because Sleeper provides integer age.
+
+1) Curves (use these exact mappings)
+
+RB:
+- 20: 60 Ascent
+- 21: 75 Ascent
+- 22: 90 Ascent
+- 23-26: 100 Prime
+- 27: 85 Decline
+- 28: 70 Decline
+- 29+: 45 Cliff
+
+WR:
+- 21: 70 Ascent
+- 22: 80 Ascent
+- 23: 90 Ascent
+- 24-28: 100 Prime
+- 29-30: 85 Decline
+- 31: 70 Decline
+- 32+: 45 Cliff
+
+TE:
+- 21: 60 Ascent
+- 22: 70 Ascent
+- 23: 80 Ascent
+- 24: 85 Ascent
+- 25-30: 100 Prime
+- 31-32: 80 Decline
+- 33+: 45 Cliff
+
+QB:
+- 21: 70 Ascent
+- 22: 75 Ascent
+- 23: 80 Ascent
+- 24: 85 Ascent
+- 25: 90 Ascent
+- 26-33: 100 Prime
+- 34-36: 85 Decline
+- 37+: 55 Cliff   (QB cliff is softer)
+
+2) Traffic Light Color Mapping (explicit in payload)
+- zone="Ascent" and score < 75 => color="blue"
+- zone="Ascent" and score >= 75 => color="green"
+- zone="Prime" => color="gold"
+- zone="Decline" => color="orange"
+- zone="Cliff" => color="red"
+- unknown/missing => color="gray"
+
+3) Prime Window labels
+RB: Prime (23–26)
+WR: Prime (24–28)
+TE: Prime (25–30)
+QB: Prime (26–33)
+
+4) Output Type
+Export getAgeCurveStatus(position, age) returning:
+
+type AgeCurveZone = "Ascent" | "Prime" | "Decline" | "Cliff" | "Unknown";
+type AgeCurveColor = "blue" | "green" | "gold" | "orange" | "red" | "gray";
+
+type AgeCurveStatus = {
+  age: number | null;
+  position: string;
+  score: number;        // 0-100 (0 if unknown)
+  zone: AgeCurveZone;
+  color: AgeCurveColor;
+  label: string;        // e.g. "Prime (24–28)"
+  prime_start: number | null;
+  prime_end: number | null;
+  dot_pct: number;      // clamp(score/100, 0..1)
+};
+
+Rules:
+- If age is null/undefined/not finite => Unknown gray score 0 label "Unknown"
+- If position not QB/RB/WR/TE => Unknown gray (safer than guessing)
+
+──────────────────────────────────────────────────────────────────────────────
+PART B — TEAM AXES + ARCHETYPE CLASSIFIER (server/engine/archetypes.ts)
+
+Goal: compute 3 axes as percentiles and classify teams into archetypes.
+Axes:
+- Power (win-now)
+- Draft capital
+- Window (longevity) — VALUE-WEIGHTED, and computed two ways (top-1% upgrade)
+
+B.0 — Percentile Safety Net (prevents NaN in dev/small datasets)
+Implement percentileRank(valuesArray, value) with:
+- If valuesArray is empty => return 50
+- If valuesArray has only 1 item => return 50
+- Else compute percentile normally
+This prevents division-by-zero / NaN during testing.
+
+B.1 — Axis definitions (math)
+
+B.1A) Power Score (Win Now)
+Compute starters_value using canonical player values:
+- Determine league mode SF vs 1QB from league roster_positions:
+  - SF if includes "SUPER_FLEX" OR has QB slot count >= 2
+- Compute starters_count = number of roster_positions that are not BN/IR/TAXI (bench slots excluded)
+- For each roster:
+  - get all player_ids on roster
+  - lookup player trade value for mode (value_sf or value_1qb)
+  - sort players by value desc
+  - starters_value = sum of top starters_count values
+  - starters_value_coverage_pct = matched_value_count / starters_count (or by count of top group)
+Convert to percentile:
+- power_pct = percentileRank(all_rosters_starters_value, this_roster_starters_value)
+
+B.1B) Draft Capital
+Compute draft_value as sum of pick values owned:
+- Prefer canonical pick_values table (if implemented)
+- If pick_values not implemented yet, use existing draft capital logic temporarily,
+  BUT still return a numeric draft_value and a draft_pct.
+Convert to percentile:
+- draft_pct = percentileRank(all_rosters_draft_value, this_roster_draft_value)
+
+B.1C) Window Score (Longevity) — CRITICAL: VALUE-WEIGHTED AGE SCORE (not average)
+We compute TWO window scores (“top-1% upgrade”):
+1) window_core_raw: value-weighted age score using core assets only
+2) window_total_raw: value-weighted age score using the entire roster (still value-weighted)
+
+Value-weighted formula:
+window_raw = SUM(player_value * age_score) / SUM(player_value)
+
+Where:
+- player_value is canonical trade value (mode-aware)
+- age_score comes from getAgeCurveStatus(position, age).score
+
+IMPORTANT FILTERS (prevent weirdness):
+- Exclude players where player_value <= 0 from BOTH numerator and denominator
+- If denominator SUM(player_value) == 0:
+  - window_raw = 0
+  - window_coverage_pct = 0
+- Also compute coverage:
+  - window_coverage_pct = (count of players included in denominator) / (players considered) * 100
+
+Core assets definition:
+- core_n = min(12, starters_count + 3) (cap at 12; this mirrors “studs define window”)
+- core group = top core_n players by value (mode-aware)
+
+Compute:
+- window_core_raw using core group only
+- window_total_raw using all players on roster (still filtering value>0)
+
+Convert both to percentiles:
+- window_core_pct = percentileRank(all_rosters_window_core_raw, this_window_core_raw)
+- window_total_pct = percentileRank(all_rosters_window_total_raw, this_window_total_raw)
+
+Use window_core_pct as the primary “window_pct” for archetypes (human-aligned).
+Still return window_total_pct for stability/secondary analytics.
+
+B.2 — Optional “Productive Struggle” refinement using MaxPF
+If matchup data exists and weeksPlayed >= 3:
+- compute maxPF_pct = percentileRank(all_rosters_maxPF, this_roster_maxPF)
+Else:
+- maxPF_pct = null and use power_pct as proxy in the rule below.
+
+B.3 — Archetype rules (apply in this exact order; first match wins)
+Inputs:
+- power_pct
+- draft_pct
+- window_pct = window_core_pct (primary)
+- optional maxPF_pct
+
+Return:
+{ archetype: string; reasons: string[]; }
+
+Rules:
+
+1) Dynasty Juggernaut:
+- power_pct > 80 && window_pct > 70
+
+2) All-In Contender:
+- power_pct > 75 && draft_pct < 40
+
+3) Fragile Contender:
+- power_pct > 70 && window_pct < 40
+
+4) Productive Struggle:
+- low_now = (maxPF_pct !== null ? maxPF_pct : power_pct) < 40
+- low_now && draft_pct > 70 && window_pct > 60
+
+5) Rebuilder:
+- power_pct < 30
+
+6) Dead Zone:
+- power_pct >= 40 && power_pct <= 60 && draft_pct < 50 && window_pct < 50
+
+7) Competitor:
+- default
+
+Reasons:
+Return 2–4 short reasons:
+- “Power 83rd pct (elite starters)”
+- “Window 31st pct (aging core)”
+- “Draft 18th pct (low ammo)”
+- “MaxPF 22nd pct (intentional tank profile)” (if available)
+
+B.4 — Calibration hook
+Thresholds must be stored in a config object with these defaults.
+Leave TODO hooks for localStorage overrides later, but hardcode defaults for v1.
+
+──────────────────────────────────────────────────────────────────────────────
+PART C — INTEGRATION (Server Endpoint + Frontend UI)
+
+C.1 Server endpoint
+Create or update:
+GET /api/league/:leagueId/power-rankings
+
+Return:
+{
+  league_id: string,
+  mode: "sf"|"1qb",
+  generated_at: number,
+  rosters: Array<{
+    roster_id: number,
+    owner_id: string|null,
+    display_name: string,
+
+    starters_value: number,
+    power_pct: number,
+
+    draft_value: number,
+    draft_pct: number,
+
+    window_core_raw: number,      // 0-100
+    window_core_pct: number,
+    window_total_raw: number,     // 0-100
+    window_total_pct: number,
+
+    window_core_coverage_pct: number,
+    window_total_coverage_pct: number,
+
+    archetype: string,
+    reasons: string[],
+
+    age_data_source: "players_master.age (sleeper integer)",
+
+    core_assets: Array<{
+      player_id: string,
+      full_name: string,
+      position: string,
+      value: number,
+      age: number|null,
+      age_curve: AgeCurveStatus
+    }>
+  }>
+}
+
+C.2 Client hook + components
+- Add usePowerRankings(leagueId) to client/src/hooks/use-sleeper.ts
+- Create AgeScaleBar.tsx:
+  - horizontal segmented bar
+  - dot at dot_pct
+  - tooltip: "Age 27 (RB) — Decline — 85/100 — Prime 23–26"
+- Add archetype badge + percentiles to the league page (Edge/Scouting section)
+
+──────────────────────────────────────────────────────────────────────────────
+PART D — VERIFICATION (must complete)
+
+D.1 Age curve unit checks
+- RB 24 => 100 Prime gold
+- RB 29 => 45 Cliff red
+- WR 22 => 80 Ascent green (>=75)
+- QB 37 => 55 Cliff red
+- Unknown => score 0 Unknown gray
+
+D.2 Value-weighted window check
+Roster:
+- Player A value 100 ageScore 100
+- Player B value 10 ageScore 45
+Expected:
+(100*100 + 10*45) / 110 = 95 (NOT simple average)
+Confirm denominator ignores value<=0 players.
+
+D.3 Percentile safety net check
+- With 0 rosters => percentileRank returns 50
+- With 1 roster => percentileRank returns 50
+
+D.4 Archetype checks with mock percentiles
+- power 85 window 75 => Juggernaut
+- power 78 draft 20 => All-In
+- power 73 window 30 => Fragile
+- low_now 30 draft 80 window 70 => Productive Struggle
+- power 25 => Rebuilder
+- power 50 draft 40 window 40 => Dead Zone
+- else => Competitor
+
+DONE WHEN:
+- Endpoint returns clean numbers (no NaN)
+- UI renders AgeScaleBar + archetypes
+- Window score is value-weighted and “core” behaves like human intuition

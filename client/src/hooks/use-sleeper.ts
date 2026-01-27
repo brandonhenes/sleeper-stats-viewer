@@ -1030,6 +1030,27 @@ export interface PositionAgeScore {
   primeYearsLeft: number;
 }
 
+export interface AgeCurveStatus {
+  age: number | null;
+  position: string;
+  score: number;
+  zone: "Ascent" | "Prime" | "Decline" | "Cliff" | "Unknown";
+  color: "blue" | "green" | "gold" | "orange" | "red" | "gray";
+  label: string;
+  prime_start: number | null;
+  prime_end: number | null;
+  dot_pct: number;
+}
+
+export interface CoreAsset {
+  player_id: string;
+  full_name: string;
+  position: string;
+  value: number;
+  age: number | null;
+  age_curve: AgeCurveStatus;
+}
+
 export interface PowerRankingsTeam {
   roster_id: number;
   owner_id: string | null;
@@ -1054,6 +1075,19 @@ export interface PowerRankingsTeam {
   efficiency_pct: number;
   luck_flag: string | null;
   archetype: string;
+  archetype_reasons?: string[];
+  
+  power_pct?: number;
+  draft_pct?: number;
+  window_core_raw?: number;
+  window_core_pct?: number;
+  window_core_coverage_pct?: number;
+  window_total_raw?: number;
+  window_total_pct?: number;
+  window_total_coverage_pct?: number;
+  
+  core_assets?: CoreAsset[];
+  age_data_source?: string;
 }
 
 export interface PowerRankingsDebug {
@@ -1072,12 +1106,16 @@ export interface PowerRankingsDebug {
 }
 
 export interface PowerRankingsResponse {
+  league_id?: string;
+  mode?: "sf" | "1qb";
+  generated_at?: number;
   leagueId: string;
   season: number;
   totalRosters: number;
   formatFlags: { superflex: boolean; tep: boolean };
   weights: PowerRankingsWeights;
   teams: PowerRankingsTeam[];
+  rosters?: PowerRankingsTeam[];
   debug?: PowerRankingsDebug;
 }
 

@@ -1,6 +1,15 @@
 import { cache, CachedRoster, CachedPlayer } from "../cache";
 import { db } from "../db";
 import * as schema from "@shared/schema";
+import { getAgeCurveStatus, AgeCurveStatus } from "./ageCurves";
+import { 
+  percentileRank as safePercentileRank,
+  classifyArchetype,
+  computeValueWeightedWindow,
+  selectCoreAssets,
+  CoreAsset
+} from "./archetypes";
+import { getPlayerValuesMap } from "../marketValues/playerValuesRepo";
 
 const BASE = "https://api.sleeper.app/v1";
 
@@ -81,15 +90,40 @@ export interface TeamRanking {
   efficiency_pct: number;
   luck_flag: string | null;
   archetype: string;
+  archetype_reasons: string[];
+  
+  power_pct: number;
+  draft_pct: number;
+  window_core_raw: number;
+  window_core_pct: number;
+  window_core_coverage_pct: number;
+  window_total_raw: number;
+  window_total_pct: number;
+  window_total_coverage_pct: number;
+  
+  core_assets: Array<{
+    player_id: string;
+    full_name: string;
+    position: string;
+    value: number;
+    age: number | null;
+    age_curve: AgeCurveStatus;
+  }>;
+  
+  age_data_source: string;
 }
 
 export interface PowerRankingsResult {
+  league_id: string;
+  mode: "sf" | "1qb";
+  generated_at: number;
   leagueId: string;
   season: number;
   totalRosters: number;
   formatFlags: { superflex: boolean; tep: boolean };
   weights: typeof DEFAULT_WEIGHTS;
   teams: TeamRanking[];
+  rosters: TeamRanking[];
   debug?: DebugInfo;
 }
 
@@ -651,7 +685,81 @@ export async function computePowerRankings(
 
   scoredRosters.sort((a, b) => b.totalScore - a.totalScore);
 
-  const teams: TeamRanking[] = scoredRosters.map((sr, idx) => {
+  const startersCount = rosterPositions.filter(isStarterSlot).length;
+  
+  const allPowerPcts: number[] = [];
+  const allDraftPcts: number[] = [];
+  const allWindowCoreRaws: number[] = [];
+  const allWindowTotalRaws: number[] = [];
+  
+  interface ExtendedRosterData {
+    sr: typeof scoredRosters[0];
+    powerPct: number;
+    draftPct: number;
+    windowCoreData: { raw: number; coverage_pct: number };
+    windowTotalData: { raw: number; coverage_pct: number };
+    coreAssets: Array<{
+      player_id: string;
+      full_name: string;
+      position: string;
+      value: number;
+      age: number | null;
+      age_curve: AgeCurveStatus;
+    }>;
+  }
+  
+  const extendedData: ExtendedRosterData[] = scoredRosters.map(sr => {
+    const playersWithValue = sr.players.map(p => ({
+      player_id: p.player_id,
+      full_name: p.full_name,
+      position: p.position,
+      age: p.age,
+      value: p.value,
+    }));
+    
+    const corePlayerList = selectCoreAssets(playersWithValue, startersCount);
+    const windowCoreData = computeValueWeightedWindow(corePlayerList);
+    const windowTotalData = computeValueWeightedWindow(playersWithValue);
+    
+    const coreAssets = corePlayerList.map(p => ({
+      player_id: p.player_id,
+      full_name: p.full_name,
+      position: p.position,
+      value: p.value,
+      age: p.age,
+      age_curve: getAgeCurveStatus(p.position, p.age),
+    }));
+    
+    allWindowCoreRaws.push(windowCoreData.raw);
+    allWindowTotalRaws.push(windowTotalData.raw);
+    
+    return {
+      sr,
+      powerPct: 0,
+      draftPct: 0,
+      windowCoreData,
+      windowTotalData,
+      coreAssets,
+    };
+  });
+  
+  const allStartersValuesFinal = extendedData.map(d => d.sr.lineup.startersValue);
+  const allPicksValuesFinal = extendedData.map(d => d.sr.picksValue);
+  
+  for (const d of extendedData) {
+    d.powerPct = safePercentileRank(allStartersValuesFinal, d.sr.lineup.startersValue);
+    d.draftPct = safePercentileRank(allPicksValuesFinal, d.sr.picksValue);
+    allPowerPcts.push(d.powerPct);
+    allDraftPcts.push(d.draftPct);
+  }
+  
+  for (const d of extendedData) {
+    (d as any).windowCorePct = safePercentileRank(allWindowCoreRaws, d.windowCoreData.raw);
+    (d as any).windowTotalPct = safePercentileRank(allWindowTotalRaws, d.windowTotalData.raw);
+  }
+
+  const teams: TeamRanking[] = extendedData.map((d, idx) => {
+    const sr = d.sr;
     const user = userMap.get(sr.roster.owner_id || "");
     const displayName = user?.display_name || `Team ${sr.roster.roster_id}`;
     
@@ -659,24 +767,25 @@ export async function computePowerRankings(
       ? sr.windowData.byPosition.reduce((sum, p) => sum + p.primeYearsLeft, 0) / sr.windowData.byPosition.length
       : 0;
 
-    const startersRank = idx + 1;
-    const picksRank = scoredRosters
-      .slice()
-      .sort((a, b) => b.picksValue - a.picksValue)
-      .findIndex(r => r.roster.roster_id === sr.roster.roster_id) + 1;
-
-    const archetype = determineArchetype(
-      startersRank,
-      picksRank,
-      sr.windowData.value,
-      avgPrimeYearsLeft,
-      totalRosters
-    );
-
     const efficiencyPct = sr.maxPf > 0 ? (sr.actualPf / sr.maxPf) * 100 : 0;
     let luckFlag: string | null = null;
     if (efficiencyPct >= 95) luckFlag = "unlucky";
     else if (efficiencyPct <= 80) luckFlag = "lucky";
+    
+    const windowCorePct = (d as any).windowCorePct;
+    const windowTotalPct = (d as any).windowTotalPct;
+    
+    const maxPfPct = sr.maxPfScore > 0 ? safePercentileRank(
+      extendedData.map(x => x.sr.maxPf), 
+      sr.maxPf
+    ) : null;
+    
+    const archetypeResult = classifyArchetype(
+      d.powerPct,
+      d.draftPct,
+      windowCorePct,
+      maxPfPct
+    );
 
     return {
       roster_id: sr.roster.roster_id,
@@ -703,17 +812,34 @@ export async function computePowerRankings(
       max_pf_score: Math.round(sr.maxPfScore * 10) / 10,
       efficiency_pct: Math.round(efficiencyPct * 10) / 10,
       luck_flag: luckFlag,
-      archetype,
+      archetype: archetypeResult.archetype,
+      archetype_reasons: archetypeResult.reasons,
+      
+      power_pct: Math.round(d.powerPct * 10) / 10,
+      draft_pct: Math.round(d.draftPct * 10) / 10,
+      window_core_raw: Math.round(d.windowCoreData.raw * 10) / 10,
+      window_core_pct: Math.round(windowCorePct * 10) / 10,
+      window_core_coverage_pct: Math.round(d.windowCoreData.coverage_pct * 10) / 10,
+      window_total_raw: Math.round(d.windowTotalData.raw * 10) / 10,
+      window_total_pct: Math.round(windowTotalPct * 10) / 10,
+      window_total_coverage_pct: Math.round(d.windowTotalData.coverage_pct * 10) / 10,
+      
+      core_assets: d.coreAssets,
+      age_data_source: "players_master.age (sleeper integer)",
     };
   });
 
   const result: PowerRankingsResult = {
+    league_id: leagueId,
+    mode: isSuperflex ? "sf" : "1qb",
+    generated_at: Date.now(),
     leagueId,
     season: leagueSeason,
     totalRosters,
     formatFlags: { superflex: isSuperflex, tep: isTep },
     weights,
     teams,
+    rosters: teams,
   };
 
   if (options.includeDebug) {
