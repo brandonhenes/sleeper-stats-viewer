@@ -79,6 +79,41 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 27, 2026 (Decision Engine v1 - Age Curves & Archetypes)
+
+**Age Curve Engine** (`server/engine/ageCurves.ts`):
+- Position-specific age curves with precise mappings:
+  - RB: Ascent 0-21, late Ascent 22-23, Prime 24-26, Decline 27-28, Cliff 29+
+  - WR: Ascent 0-23, late Ascent 24-25, Prime 26-29, Decline 30-31, Cliff 32+
+  - TE: Ascent 0-23, late Ascent 24-25, Prime 26-30, Decline 31-32, Cliff 33+
+  - QB: Ascent 0-23, late Ascent 24-25, Prime 26-33, Decline 34-36, Cliff 37+
+- Traffic light color system: blue (Ascent), green (late Ascent), gold (Prime), orange (Decline), red (Cliff), gray (Unknown)
+- `getAgeCurveStatus(age, position)` returns full AgeCurveStatus with dot_pct for UI rendering
+
+**Archetype Classifier** (`server/engine/archetypes.ts`):
+- Value-weighted window calculation (player value as weight, not simple average)
+- Core assets selection: min(12, startersCount + 3) top players by value
+- Percentile safety net: returns 50 for empty or single-item arrays
+- Archetype classification with priority order:
+  1. Dynasty Juggernaut: power ≥ 85 AND window ≥ 70
+  2. All-In Contender: power ≥ 75 AND window < 50 AND draft < 40
+  3. Fragile Contender: power ≥ 70 AND window < 50
+  4. Productive Struggle: power 40-69 AND draft ≥ 50 AND window ≥ 50
+  5. Dead Zone: power 40-69 AND draft < 40 AND window < 50
+  6. Rebuilder: power < 40 AND draft ≥ 60
+  7. Competitor: default
+
+**Power Rankings Enhancement** (`server/engine/powerRankings.ts`):
+- New response fields: power_pct, draft_pct, window_core_raw/pct, window_total_raw/pct
+- Core assets with full age_curve objects for each player
+- Archetype classification with human-readable reasons
+- Dual window calculations: core (top N players) and total (full roster)
+
+**UI Components** (`client/src/components/AgeScaleBar.tsx`):
+- AgeScaleBar: Visual scale showing player age on position curve with color-coded dot
+- ArchetypeBadge: Color-coded team classification with tooltip reasons
+- PercentileBar: Visual bar for displaying percentile values
+
 ### January 26, 2026 (Canonical Player Value Pipeline)
 
 **Player Values Table** (`shared/schema.ts`):
