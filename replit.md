@@ -79,6 +79,30 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### January 28, 2026 (UI Unification & Navigation Restructure)
+
+**Navigation Restructure** (`client/src/components/Layout.tsx`):
+- Updated navigation tabs: Dashboard, Trophy Room, Edge Engine, Player Market, Compare
+- Icons: LayoutDashboard (Dashboard), Trophy (Trophy Room), Zap (Edge Engine), TrendingUp (Player Market), Users (Compare)
+- Clean separation: Past (Trophy Room) vs Future (Edge Engine)
+
+**Dashboard Simplification** (`client/src/pages/Profile.tsx`):
+- Simplified to navigation hub with user profile header and stats
+- Navigation cards for Trophy Room (yellow) and Edge Engine (blue)
+- League group cards with filtering by season and type
+- Removed heavy analytics tables/charts (moved to dedicated pages)
+
+**Edge Engine Enhancement** (`client/src/pages/EdgeEngine.tsx`):
+- Uses canonical `/api/league/:leagueId/power-rankings` endpoint
+- Displays True Power Score with formula tooltip (45% Starters + 15% Bench + 25% Picks + 10% Window + 5% Age)
+- ArchetypeBadge for each team (Dynasty Juggernaut, All-In Contender, Fragile Contender, etc.)
+- Core Assets tab with AgeScaleBar components showing position-specific age curves
+- Trade Radar tab for trade opportunities
+
+**Trophy Room** (`client/src/pages/TrophyRoom.tsx`):
+- Already complete with Season History, H2H Records, and Achievements tabs
+- Historical achievements focus (past performance)
+
 ### January 27, 2026 (Decision Engine v1 - Age Curves & Archetypes)
 
 **Age Curve Engine** (`server/engine/ageCurves.ts`):
