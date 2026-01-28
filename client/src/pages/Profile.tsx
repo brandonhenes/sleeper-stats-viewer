@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, Link, useLocation } from "wouter";
-import { useSleeperOverview, useSleeperSync, useSyncStatus, useGroupAnalytics } from "@/hooks/use-sleeper";
+import { useSleeperOverview, useSleeperSync, useSyncStatus } from "@/hooks/use-sleeper";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertCircle, RefreshCw, Clock, Filter, LayoutList, LayoutGrid, ArrowUpDown, ChevronUp, ChevronDown, Trophy, TrendingUp } from "lucide-react";
+import { Loader2, AlertCircle, RefreshCw, Clock, Filter, Trophy, Zap, TrendingUp, ArrowRight } from "lucide-react";
 import { LeagueGroupCard } from "@/components/LeagueCard";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { motion } from "framer-motion";
@@ -13,30 +13,21 @@ import { Progress } from "@/components/ui/progress";
 import { Layout } from "@/components/Layout";
 import { useSeason } from "@/hooks/useSeason";
 import { SeasonSelector } from "@/components/SeasonSelector";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 type LeagueType = "all" | "dynasty" | "redraft" | "unknown";
-type ViewMode = "active" | "history";
-type DisplayMode = "cards" | "table";
-type SortKey = "name" | "rank" | "starters" | "total" | "coverage";
-type SortDir = "asc" | "desc";
 
 export default function Profile() {
   const { username } = useParams<{ username: string }>();
   const [, setLocation] = useLocation();
   const [jobId, setJobId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<LeagueType>("all");
-  const [viewMode, setViewMode] = useState<ViewMode>("active");
-  const [displayMode, setDisplayMode] = useState<DisplayMode>("cards");
-  const [sortKey, setSortKey] = useState<SortKey>("rank");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const { toast } = useToast();
 
   const { data, isLoading, error, isError, refetch } = useSleeperOverview(username);
   const syncMutation = useSleeperSync();
   const { data: syncStatus } = useSyncStatus(jobId || undefined, !!jobId);
   
-  // Derive available seasons before calling useGroupAnalytics
   const allLeagueGroupsForSeasons = data?.league_groups || [];
   const availableSeasonsEarly = useMemo(() => {
     const seasons = new Set<number>();
@@ -50,8 +41,6 @@ export default function Profile() {
   
   const latestCompletedSeasonEarly = (data as any)?.latest_completed_season ?? null;
   const { season, setSeason, seasons } = useSeason(availableSeasonsEarly, latestCompletedSeasonEarly);
-  
-  const { data: groupAnalytics, isLoading: analyticsLoading } = useGroupAnalytics(username, season || undefined);
 
   const autoSyncTriggeredRef = useRef(false);
 
@@ -118,18 +107,11 @@ export default function Profile() {
   };
 
   const allLeagueGroups = data?.league_groups || [];
-
-  // Split into active vs history groups based on is_active flag
   const activeGroups = allLeagueGroups.filter(g => g.is_active !== false);
-  const historyGroups = allLeagueGroups.filter(g => g.is_active === false);
   
-  // Use the selected view mode to determine base groups
-  const leagueGroups = viewMode === "active" ? activeGroups : historyGroups;
-  
-  // Filter by season (show groups that include the selected season)
   const seasonFilteredGroups = season 
-    ? leagueGroups.filter(g => g.min_season <= season && g.max_season >= season)
-    : leagueGroups;
+    ? activeGroups.filter(g => g.min_season <= season && g.max_season >= season)
+    : activeGroups;
   
   const filteredGroups = seasonFilteredGroups.filter((g) => {
     if (typeFilter === "all") return true;
@@ -137,7 +119,6 @@ export default function Profile() {
     return leagueType === typeFilter;
   });
 
-  const hasLeagues = filteredGroups.length > 0;
   const isSyncing = syncMutation.isPending || (syncStatus?.status === "running") || data?.sync_status === "running";
 
   const formatLastSync = (timestamp?: number) => {
@@ -146,119 +127,34 @@ export default function Profile() {
     return date.toLocaleString();
   };
 
-  // Stats computed from active groups only (default view)
   const totalWins = activeGroups.reduce((acc, g) => acc + g.overall_record.wins, 0);
   const totalLosses = activeGroups.reduce((acc, g) => acc + g.overall_record.losses, 0);
   const totalTies = activeGroups.reduce((acc, g) => acc + g.overall_record.ties, 0);
   const totalGames = totalWins + totalLosses + totalTies;
   const winPct = totalGames > 0 ? ((totalWins + totalTies * 0.5) / totalGames * 100).toFixed(1) : "0.0";
 
-  // Type counts for current view mode
-  const dynastyCount = leagueGroups.filter(g => g.league_type === "dynasty").length;
-  const redraftCount = leagueGroups.filter(g => g.league_type === "redraft").length;
-  const unknownCount = leagueGroups.filter(g => !g.league_type || g.league_type === "unknown").length;
+  const dynastyCount = activeGroups.filter(g => g.league_type === "dynasty").length;
+  const redraftCount = activeGroups.filter(g => g.league_type === "redraft").length;
+  const unknownCount = activeGroups.filter(g => !g.league_type || g.league_type === "unknown").length;
 
   const syncProgress = syncStatus?.leagues_total && syncStatus.leagues_total > 0
     ? Math.round((syncStatus.leagues_done || 0) / syncStatus.leagues_total * 100)
     : 0;
 
-  // Build set of group IDs that match current filters
-  const filteredGroupIds = useMemo(() => {
-    return new Set(filteredGroups.map(g => g.group_id));
-  }, [filteredGroups]);
-
-  // Sorted analytics with rank distribution (filtered to match cards view)
-  const sortedAnalytics = useMemo(() => {
-    if (!groupAnalytics?.group_analytics) return [];
-    
-    // Filter analytics to only include groups matching current view/type/season filters
-    const analytics = groupAnalytics.group_analytics.filter(a => filteredGroupIds.has(a.group_id));
-    
-    analytics.sort((a, b) => {
-      let cmp = 0;
-      switch (sortKey) {
-        case "name":
-          cmp = a.league_name.localeCompare(b.league_name);
-          break;
-        case "rank":
-          cmp = (a.my_talent_rank ?? 999) - (b.my_talent_rank ?? 999);
-          break;
-        case "starters":
-          cmp = b.starter_value - a.starter_value;
-          break;
-        case "total":
-          cmp = b.total_value - a.total_value;
-          break;
-        case "coverage":
-          cmp = b.coverage_pct - a.coverage_pct;
-          break;
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    
-    return analytics;
-  }, [groupAnalytics, sortKey, sortDir, filteredGroupIds]);
-
-  // Rank distribution for summary
-  const rankDistribution = useMemo(() => {
-    if (!sortedAnalytics.length) return { top3: 0, top6: 0, bottom3: 0, avg: 0 };
-    
-    const rankedLeagues = sortedAnalytics.filter(a => a.my_talent_rank !== null);
-    if (!rankedLeagues.length) return { top3: 0, top6: 0, bottom3: 0, avg: 0 };
-    
-    const top3 = rankedLeagues.filter(a => a.my_talent_rank! <= 3).length;
-    const top6 = rankedLeagues.filter(a => a.my_talent_rank! <= 6).length;
-    const bottom3 = rankedLeagues.filter(a => {
-      const total = a.total_rosters;
-      return a.my_talent_rank! > (total - 3);
-    }).length;
-    const avg = rankedLeagues.reduce((sum, a) => sum + (a.my_talent_rank || 0), 0) / rankedLeagues.length;
-    
-    return { top3, top6, bottom3, avg };
-  }, [sortedAnalytics]);
-
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
-    } else {
-      setSortKey(key);
-      setSortDir(key === "name" ? "asc" : "asc");
-    }
-  };
-
-  const fmtValue = (v: number) => {
-    if (v >= 1000) return `${(v / 1000).toFixed(1)}K`;
-    return v.toString();
-  };
-
-  const getRankBadgeColor = (rank: number | null, total: number) => {
-    if (rank === null) return "bg-muted text-muted-foreground";
-    const pct = rank / total;
-    if (pct <= 0.25) return "bg-green-500/20 text-green-600 dark:text-green-400";
-    if (pct <= 0.5) return "bg-blue-500/20 text-blue-600 dark:text-blue-400";
-    if (pct <= 0.75) return "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400";
-    return "bg-red-500/20 text-red-600 dark:text-red-400";
-  };
-
-  // Sort cards by power rank (best first), with low-confidence tiles at bottom
   const sortedFilteredGroups = useMemo(() => {
     return [...filteredGroups].sort((a, b) => {
       const aPower = a.power;
       const bPower = b.power;
       
-      // No power data goes to bottom
       if (!aPower && !bPower) return a.name.localeCompare(b.name);
       if (!aPower) return 1;
       if (!bPower) return -1;
       
-      // Low confidence goes to bottom
       if (aPower.lowConfidence && !bPower.lowConfidence) return 1;
       if (!aPower.lowConfidence && bPower.lowConfidence) return -1;
       
-      // Both same confidence: sort by rank (lower is better)
       if (aPower.rank !== bPower.rank) return aPower.rank - bPower.rank;
       
-      // Tiebreaker: total value (higher is better)
       return bPower.total - aPower.total;
     });
   }, [filteredGroups]);
@@ -372,33 +268,62 @@ export default function Profile() {
                 </motion.div>
               )}
 
+              <div className="grid md:grid-cols-2 gap-4 mb-8">
+                <Link href={`/trophy/${username}`}>
+                  <Card className="hover-elevate cursor-pointer h-full">
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-yellow-500/10">
+                          <Trophy className="w-8 h-8 text-yellow-500" />
+                        </div>
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            Trophy Room
+                            <ArrowRight className="w-4 h-4" />
+                          </CardTitle>
+                          <CardDescription>View your historical achievements</CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground">
+                        Season history, head-to-head records, championships, and milestones from your dynasty legacy.
+                      </p>
+                    </CardContent>
+                  </Card>
+                </Link>
+                
+                <Link href={`/edge/${username}`}>
+                  <Card className="hover-elevate cursor-pointer h-full">
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 rounded-lg bg-blue-500/10">
+                          <Zap className="w-8 h-8 text-blue-500" />
+                        </div>
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            Edge Engine
+                            <ArrowRight className="w-4 h-4" />
+                          </CardTitle>
+                          <CardDescription>Strategic decision-making tools</CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground">
+                        Power rankings, team archetypes, age curves, trade radar, and roster analysis.
+                      </p>
+                    </CardContent>
+                  </Card>
+                </Link>
+              </div>
+
               <div className="flex items-center gap-4 mb-6 flex-wrap">
                 <SeasonSelector 
                   season={season} 
                   seasons={seasons} 
                   onChange={setSeason} 
                 />
-                
-                <div className="h-6 w-px bg-border" />
-                
-                <div className="flex gap-2">
-                  <Button
-                    variant={viewMode === "active" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setViewMode("active")}
-                    data-testid="view-active"
-                  >
-                    Active ({activeGroups.length})
-                  </Button>
-                  <Button
-                    variant={viewMode === "history" ? "secondary" : "outline"}
-                    size="sm"
-                    onClick={() => setViewMode("history")}
-                    data-testid="view-history"
-                  >
-                    History ({historyGroups.length})
-                  </Button>
-                </div>
                 
                 <div className="h-6 w-px bg-border" />
                 
@@ -410,7 +335,7 @@ export default function Profile() {
                     onClick={() => setTypeFilter("all")}
                     data-testid="filter-all"
                   >
-                    All ({leagueGroups.length})
+                    All ({activeGroups.length})
                   </Badge>
                   <Badge
                     variant={typeFilter === "dynasty" ? "default" : "outline"}
@@ -439,198 +364,35 @@ export default function Profile() {
                     </Badge>
                   )}
                 </div>
-                
-                <div className="ml-auto flex gap-1">
-                  <Button
-                    size="icon"
-                    variant={displayMode === "cards" ? "default" : "outline"}
-                    onClick={() => setDisplayMode("cards")}
-                    data-testid="display-cards"
-                  >
-                    <LayoutGrid className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant={displayMode === "table" ? "default" : "outline"}
-                    onClick={() => setDisplayMode("table")}
-                    data-testid="display-table"
-                  >
-                    <LayoutList className="w-4 h-4" />
-                  </Button>
-                </div>
               </div>
 
-              {displayMode === "table" && (
-                <div className="mb-8">
-                  <Card>
-                    <CardHeader className="py-4">
-                      <div className="flex items-center justify-between gap-4 flex-wrap">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <TrendingUp className="w-5 h-5 text-primary" />
-                          Talent Rankings
-                        </CardTitle>
-                        {sortedAnalytics.length > 0 && (
-                          <div className="flex gap-4 text-sm">
-                            <div className="flex items-center gap-1">
-                              <Trophy className="w-4 h-4 text-green-500" />
-                              <span>Top 3: {rankDistribution.top3}</span>
-                            </div>
-                            <div>Top 6: {rankDistribution.top6}</div>
-                            <div className="text-muted-foreground">
-                              Avg Rank: {rankDistribution.avg.toFixed(1)}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      {analyticsLoading ? (
-                        <div className="flex items-center justify-center py-12">
-                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                        </div>
-                      ) : sortedAnalytics.length === 0 ? (
-                        <div className="text-center py-12 text-muted-foreground">
-                          No talent data available
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b bg-muted/30">
-                                <th 
-                                  className="text-left py-3 px-4 font-medium cursor-pointer hover-elevate"
-                                  onClick={() => handleSort("name")}
-                                  data-testid="sort-name"
-                                >
-                                  <div className="flex items-center gap-1">
-                                    League
-                                    {sortKey === "name" && (sortDir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                                  </div>
-                                </th>
-                                <th className="text-center py-3 px-2 font-medium">Format</th>
-                                <th 
-                                  className="text-center py-3 px-4 font-medium cursor-pointer hover-elevate"
-                                  onClick={() => handleSort("rank")}
-                                  data-testid="sort-rank"
-                                >
-                                  <div className="flex items-center justify-center gap-1">
-                                    Rank
-                                    {sortKey === "rank" && (sortDir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                                  </div>
-                                </th>
-                                <th 
-                                  className="text-right py-3 px-4 font-medium cursor-pointer hover-elevate"
-                                  onClick={() => handleSort("starters")}
-                                  data-testid="sort-starters"
-                                >
-                                  <div className="flex items-center justify-end gap-1">
-                                    Starters
-                                    {sortKey === "starters" && (sortDir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                                  </div>
-                                </th>
-                                <th className="text-right py-3 px-4 font-medium">Bench</th>
-                                <th className="text-right py-3 px-4 font-medium">Picks</th>
-                                <th 
-                                  className="text-right py-3 px-4 font-medium cursor-pointer hover-elevate"
-                                  onClick={() => handleSort("total")}
-                                  data-testid="sort-total"
-                                >
-                                  <div className="flex items-center justify-end gap-1">
-                                    Total
-                                    {sortKey === "total" && (sortDir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                                  </div>
-                                </th>
-                                <th 
-                                  className="text-right py-3 px-4 font-medium cursor-pointer hover-elevate"
-                                  onClick={() => handleSort("coverage")}
-                                  data-testid="sort-coverage"
-                                >
-                                  <div className="flex items-center justify-end gap-1">
-                                    Coverage
-                                    {sortKey === "coverage" && (sortDir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                                  </div>
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {sortedAnalytics.map((a) => (
-                                <tr 
-                                  key={a.group_id} 
-                                  className="border-b last:border-0 hover-elevate cursor-pointer"
-                                  onClick={() => setLocation(`/u/${username}/league/${a.group_id}`)}
-                                  data-testid={`row-league-${a.group_id}`}
-                                >
-                                  <td className="py-3 px-4 font-medium">{a.league_name}</td>
-                                  <td className="py-3 px-2 text-center">
-                                    <div className="flex items-center justify-center gap-1">
-                                      {a.format.superflex && (
-                                        <Badge variant="outline" className="text-xs px-1.5 py-0.5">SF</Badge>
-                                      )}
-                                      {a.format.tep && (
-                                        <Badge variant="outline" className="text-xs px-1.5 py-0.5">TEP</Badge>
-                                      )}
-                                      {!a.format.superflex && !a.format.tep && (
-                                        <span className="text-muted-foreground text-xs">1QB</span>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="py-3 px-4 text-center">
-                                    <Badge className={`${getRankBadgeColor(a.my_talent_rank, a.total_rosters)} px-2`}>
-                                      {a.my_talent_rank !== null ? `#${a.my_talent_rank}` : "—"} / {a.total_rosters}
-                                    </Badge>
-                                  </td>
-                                  <td className="py-3 px-4 text-right font-mono">{fmtValue(a.starter_value)}</td>
-                                  <td className="py-3 px-4 text-right font-mono text-muted-foreground">{fmtValue(a.bench_value)}</td>
-                                  <td className="py-3 px-4 text-right font-mono text-muted-foreground">{fmtValue(a.pick_value)}</td>
-                                  <td className="py-3 px-4 text-right font-mono font-bold">{fmtValue(a.total_value)}</td>
-                                  <td className="py-3 px-4 text-right">
-                                    <span className={a.coverage_pct >= 80 ? "text-green-600 dark:text-green-400" : a.coverage_pct >= 50 ? "text-yellow-600 dark:text-yellow-400" : "text-red-600 dark:text-red-400"}>
-                                      {a.coverage_pct}%
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+              {sortedFilteredGroups.length === 0 ? (
+                <div className="text-center py-12">
+                  <TrendingUp className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <h3 className="text-xl font-semibold mb-2">No Leagues Found</h3>
+                  <p className="text-muted-foreground">
+                    {typeFilter !== "all" 
+                      ? `No ${typeFilter} leagues found for this season.`
+                      : "No active leagues found. Try syncing your data."}
+                  </p>
                 </div>
-              )}
-
-              {displayMode === "cards" && hasLeagues && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {sortedFilteredGroups.map((group, idx) => (
-                    <LeagueGroupCard 
-                      key={group.group_id} 
-                      group={group} 
-                      index={idx} 
-                      username={username || ""} 
-                      selectedSeason={season}
-                    />
+                    <motion.div
+                      key={group.group_id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                    >
+                      <LeagueGroupCard 
+                        group={group} 
+                        index={idx}
+                        username={username || ""} 
+                        selectedSeason={season}
+                      />
+                    </motion.div>
                   ))}
-                </div>
-              )}
-
-              {!hasLeagues && !isSyncing && leagueGroups.length > 0 && (
-                <div className="text-center py-20 opacity-50">
-                  <p className="text-xl">No leagues match this filter.</p>
-                </div>
-              )}
-
-              {!hasLeagues && !isSyncing && leagueGroups.length === 0 && (
-                <div className="text-center py-20 opacity-50">
-                  <p className="text-xl">No leagues found for this user.</p>
-                  <p className="text-muted-foreground mt-2">Try clicking "Sync Now" to fetch data.</p>
-                </div>
-              )}
-
-              {!hasLeagues && isSyncing && (
-                <div className="text-center py-20">
-                  <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
-                  <p className="text-xl">Syncing your leagues...</p>
-                  <p className="text-muted-foreground mt-2">This may take a moment.</p>
                 </div>
               )}
             </div>

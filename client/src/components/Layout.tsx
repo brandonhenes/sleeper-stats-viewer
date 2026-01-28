@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Users, Trophy, Zap, TrendingUp } from "lucide-react";
+import { LayoutDashboard, Users, Trophy, Zap, TrendingUp } from "lucide-react";
 import { DebugDrawer } from "./DebugDrawer";
 
 interface LayoutProps {
@@ -14,10 +14,11 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
   const [location] = useLocation();
   
   const getActiveTab = () => {
-    if (location.includes("/trophy/") || location.includes("/players/")) return "trophy";
-    if (location.includes("/edge/") || location.includes("/scouting/") || location.includes("/market/")) return "edge";
+    if (location.includes("/trophy/")) return "trophy";
+    if (location.includes("/edge/") || location.includes("/scouting/")) return "edge";
+    if (location.includes("/players/") || location.includes("/market/")) return "market";
     if (location.includes("/compare")) return "compare";
-    return "profile";
+    return "dashboard";
   };
 
   const showTabs = location !== "/" && (username || location.includes("/compare"));
@@ -38,9 +39,9 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
                 <TabsList className="bg-secondary/50">
                   {username && (
                     <Link href={`/u/${username}`}>
-                      <TabsTrigger value="profile" className="gap-2" data-testid="tab-profile">
-                        <User className="w-4 h-4" />
-                        Profile
+                      <TabsTrigger value="dashboard" className="gap-2" data-testid="tab-dashboard">
+                        <LayoutDashboard className="w-4 h-4" />
+                        Dashboard
                       </TabsTrigger>
                     </Link>
                   )}
@@ -57,6 +58,14 @@ export function Layout({ username, groupId, leagueId, children }: LayoutProps) {
                       <TabsTrigger value="edge" className="gap-2" data-testid="tab-edge-engine">
                         <Zap className="w-4 h-4" />
                         Edge Engine
+                      </TabsTrigger>
+                    </Link>
+                  )}
+                  {username && (
+                    <Link href={`/players/${username}`}>
+                      <TabsTrigger value="market" className="gap-2" data-testid="tab-player-market">
+                        <TrendingUp className="w-4 h-4" />
+                        Player Market
                       </TabsTrigger>
                     </Link>
                   )}
