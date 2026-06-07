@@ -40,7 +40,7 @@ const DEFAULT_WEIGHTS: EdgeEngineWeights = {
   starters: 45,
   bench: 15,
   picks: 15,
-  depth: 20,
+  maxPf: 20,
   age: 5,
 };
 
